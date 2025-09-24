@@ -1,0 +1,78 @@
+---
+# Common Customer Information
+client_id: "FDR"
+client_id_lower: "fdr"
+client_id_upper: "FDR"
+
+# Database Configuration
+db_host: "127.0.0.1"
+db_username_prod: "bfcguipfdr"
+db_password_prod: "guifdrpwd"
+db_username_test: "bfcguitfdr"
+db_password_test: "guifdrpwd"
+
+# Dakota Configuration - Common
+dakota_http_port: 11300
+dakota_shutdown_port: 11385
+dakota_redirect_port: 11383
+dakota_ajp_port: 11389
+dakota_tomcat_dirname: "Tomcat7082FDR11"
+
+# Dakota Configuration - Version Specific
+dakota_versions:
+  "7.8":
+    libraries_string: "BFCGLOFDRF,DKT78.0,FDRSQL,FDRSQLPGM,QGPL,QTEMP"
+    prod_libraries_string: "BFCGLOFDRF,FDRMODS001,FDRMODS,FDRF,FDRFIX001,DKT78.0,FDRFIX,FDRSQL,FDRSQLPGM,QGPL,QTEMP"
+    test_libraries_string: "BFCGLOFDRF,FDRTEMP,FDRFIXTST,FDRFIXTST1,DKT78.0,FDRFIX,FDRSQL,FDRSQLPGM,QGPL,QTEMP"
+    program_library: "DKT78.0"
+  "7.9":
+    libraries_string: "BFCGLOFDRF,FDRFIX,FDRDKT,FDRSQL,FDRSQLPGM,QGPL,QTEMP"
+    prod_libraries_string: "BFCGLOFDRF,FDRMODS001,FDRMODS,FDRF,FDRFIX001,FDRDKT001,FDRFIX,FDRDKT,FDRSQL,FDRSQLPGM,QGPL,QTEMP"
+    test_libraries_string: "BFCGLOFDRF,FDRTEMP,FDRFIXTST,FDRDKTTST,FDRTSTF,FDRFIXTST1,FDRDKTTST1,FDRFIX,FDRDKT,FDRSQL,FDRSQLPGM,QGPL,QTEMP"
+    program_library: "FDRDKT"
+
+# SelectPrime Configuration - Common  
+selectprime_http_port: 11600
+selectprime_shutdown_port: 11605
+selectprime_redirect_port: 11643
+selectprime_ajp_port: 11609
+selectprime_tomcat_dirname: "Tomcat7082FDRApps16"
+selectprime_config_host: "127.0.0.1"
+selectprime_program_library: "FDRAPPS"
+
+# SelectPrime Configuration - Version Specific
+selectprime_versions:
+  "1.0":
+    thread_pool_size: 100
+    app_features: "standard"
+
+# API Configuration - Common
+api_client_port_num: 11
+api_http_port: 11200
+api_shutdown_port: 11205
+api_redirect_port: 11243
+api_ajp_port: 11209
+api_test_http_port: 11220
+api_test_shutdown_port: 11225
+api_test_redirect_port: 11263
+api_test_ajp_port: 11229
+api_tomcat_dirname: "Tomcat7082FDR12Int"
+
+# API Configuration - Version Specific
+api_versions:
+  "1.0":
+    auth_method: "basic"
+    connection_timeout: 30000
+
+# Trax Configuration - Common
+trax_http_port: 11100
+trax_shutdown_port: 11185
+trax_redirect_port: 11183
+trax_ajp_port: 11189
+trax_tomcat_dirname: "Tomcat9073FDRTRAX11100"
+
+# Trax Configuration - Version Specific
+trax_versions:
+  "1.0":
+    cache_size: "512m"
+    max_connections: 50

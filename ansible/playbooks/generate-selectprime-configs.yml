@@ -1,0 +1,78 @@
+---
+# Tasks for generating SelectPrime configuration files
+# This is not a standalone playbook but is included from the main playbook
+
+- name: Load customer variables
+  include_vars:
+    file: "{{ playbook_dir }}/../group_vars/{{ current_customer }}.yml"
+    
+- name: Display SelectPrime generation info
+  debug:
+    msg:
+      - "SelectPrime Config Generation for {{ client_id }}"
+      - "====================================="
+      - "Client ID: {{ client_id }}"
+      - "Tomcat directory: {{ selectprime_tomcat_dirname }}"
+      - "Version: {{ current_version }}"
+    verbosity: 1
+
+- name: Ensure output directories exist for SelectPrime with version
+  file:
+    path: "{{ project_root }}/output/selectprime/v{{ current_version }}/{{ client_id }}/{{ directory_path }}"
+    state: directory
+  loop:
+    - "BFCApps/conf"
+    - "BFCApps/BFC_Configuration_File"
+  loop_control:
+    loop_var: directory_path
+    
+- name: Generate server.xml for SelectPrime
+  template:
+    src: "{{ project_root }}/ansible/templates/selectprime/server.xml.j2"
+    dest: "{{ project_root }}/output/selectprime/v{{ current_version }}/{{ client_id }}/BFCApps/conf/server.xml"
+  register: server_xml_result
+    
+- name: Generate BFCConfigurationFile.xml for SelectPrime
+  template:
+    src: "{{ project_root }}/ansible/templates/selectprime/BFCConfigurationFile.xml.j2"
+    dest: "{{ project_root }}/output/selectprime/v{{ current_version }}/{{ client_id }}/BFCApps/BFC_Configuration_File/BFCConfigurationFile.xml"
+  register: bfc_config_file_result
+
+# Create additional directories for SelectPrime - helpful for complete package setup
+- name: Create additional SelectPrime directories
+  file:
+    path: "{{ project_root }}/output/selectprime/v{{ current_version }}/{{ client_id }}/{{ directory_path }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "BFCApps/logs"
+    - "BFCApps/temp"
+    - "BFCApps/work"
+    - "BFCApps/webapps"
+  loop_control:
+    loop_var: directory_path
+
+- name: Create version info file
+  copy:
+    content: |
+      # SelectPrime Configuration Version Information
+      product=SelectPrime
+      version={{ current_version }}
+      customer={{ client_id }}
+      generated_date={{ ansible_date_time.iso8601 }}
+      generated_by=bfc-java-config-automation
+      tomcat_directory={{ selectprime_tomcat_dirname }}
+      http_port={{ selectprime_http_port }}
+      shutdown_port={{ selectprime_shutdown_port }}
+    dest: "{{ project_root }}/output/selectprime/v{{ current_version }}/{{ client_id }}/BFCApps/conf/version.properties"
+
+- name: Report generation status
+  debug:
+    msg:
+      - "SelectPrime Configuration Generation Report"
+      - "=========================================="
+      - "SelectPrime Version: {{ current_version }}"
+      - "server.xml: {{ 'Generated successfully' if server_xml_result.changed else 'No change' }}"
+      - "BFCConfigurationFile.xml: {{ 'Generated successfully' if bfc_config_file_result.changed else 'No change' }}"
+      - "Generated files are in: {{ project_root }}/output/selectprime/v{{ current_version }}/{{ client_id }}/"
+    verbosity: 1

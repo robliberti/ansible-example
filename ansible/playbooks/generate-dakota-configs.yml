@@ -1,0 +1,219 @@
+---
+# Tasks for generating Dakota configuration files
+# This is not a standalone playbook but is included from the main playbook
+
+- name: Load customer variables
+  include_vars:
+    file: "{{ playbook_dir }}/../group_vars/{{ current_customer }}.yml"
+    
+- name: Set version-specific variables for Dakota
+  set_fact:
+    dakota_version_vars: "{{ dakota_versions[current_version] | default({}) if dakota_versions is defined else {} }}"
+
+- name: Display Dakota generation info
+  debug:
+    msg:
+      - "Dakota Config Generation for {{ client_id }}"
+      - "==============================="
+      - "Client ID: {{ client_id }}"
+      - "Client ID (uppercase): {{ client_id_upper }}"
+      - "Tomcat directory: {{ dakota_tomcat_dirname }}"
+      - "Version: {{ current_version }}"
+      - "Version-specific vars: {{ dakota_version_vars | to_nice_json }}"
+    verbosity: 1
+
+- name: Ensure output directories exist for Dakota with version
+  file:
+    path: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/{{ directory_path }}"
+    state: directory
+  loop:
+    - "BFCDakota/conf/catalina/localhost"
+    - "BFCDakota/m-power/mrcjava/WEB-INF/classes"
+    - "BFCDakota/lib"
+    - "BFCDakota/webapps/TruckBuilder/WEB-INF/classes"
+  loop_control:
+    loop_var: directory_path
+    
+# TEMPLATE HANDLING - Check for version-specific templates first, then fall back to defaults
+
+- name: Check if version-specific template exists for server.xml
+  stat:
+    path: "{{ project_root }}/ansible/templates/dakota/v{{ current_version }}/server.xml.j2"
+  register: version_specific_template
+
+- name: Generate server.xml for Dakota (version-specific template)
+  template:
+    src: "{{ project_root }}/ansible/templates/dakota/v{{ current_version }}/server.xml.j2"
+    dest: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/conf/server.xml"
+  register: server_xml_result
+  when: version_specific_template.stat.exists
+    
+- name: Generate server.xml for Dakota (default template)
+  template:
+    src: "{{ project_root }}/ansible/templates/dakota/server.xml.j2"
+    dest: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/conf/server.xml"
+  register: server_xml_result_default
+  when: not version_specific_template.stat.exists
+
+- name: Check if version-specific template exists for mrcjava.xml
+  stat:
+    path: "{{ project_root }}/ansible/templates/dakota/v{{ current_version }}/mrcjava.xml.j2"
+  register: version_specific_mrcjava_template
+
+- name: Generate mrcjava.xml for Dakota (version-specific template)
+  template:
+    src: "{{ project_root }}/ansible/templates/dakota/v{{ current_version }}/mrcjava.xml.j2"
+    dest: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/conf/catalina/localhost/mrcjava.xml"
+  register: mrcjava_xml_result
+  when: version_specific_mrcjava_template.stat.exists
+    
+- name: Generate mrcjava.xml for Dakota (default template)
+  template:
+    src: "{{ project_root }}/ansible/templates/dakota/mrcjava.xml.j2"
+    dest: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/conf/catalina/localhost/mrcjava.xml"
+  register: mrcjava_xml_result_default
+  when: not version_specific_mrcjava_template.stat.exists
+
+- name: Check if version-specific template exists for mrc-spring-context.xml
+  stat:
+    path: "{{ project_root }}/ansible/templates/dakota/v{{ current_version }}/mrc-spring-context.xml.j2"
+  register: version_specific_spring_template
+
+- name: Generate mrc-spring-context.xml for Dakota (version-specific template)
+  template:
+    src: "{{ project_root }}/ansible/templates/dakota/v{{ current_version }}/mrc-spring-context.xml.j2"
+    dest: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/m-power/mrcjava/WEB-INF/classes/mrc-spring-context.xml"
+  register: mrc_spring_context_xml_result
+  when: version_specific_spring_template.stat.exists
+    
+- name: Generate mrc-spring-context.xml for Dakota (default template)
+  template:
+    src: "{{ project_root }}/ansible/templates/dakota/mrc-spring-context.xml.j2"
+    dest: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/m-power/mrcjava/WEB-INF/classes/mrc-spring-context.xml"
+  register: mrc_spring_context_xml_result_default
+  when: not version_specific_spring_template.stat.exists
+
+# Check for version-specific bfc.properties template
+- name: Check if version-specific template exists for bfc.properties
+  stat:
+    path: "{{ project_root }}/ansible/templates/dakota/v{{ current_version }}/bfc.properties.j2"
+  register: version_specific_bfc_properties_template
+
+- name: Generate bfc.properties for Dakota (version-specific template)
+  template:
+    src: "{{ project_root }}/ansible/templates/dakota/v{{ current_version }}/bfc.properties.j2"
+    dest: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/webapps/TruckBuilder/WEB-INF/classes/bfc.properties"
+  register: bfc_properties_result
+  when: version_specific_bfc_properties_template.stat.exists
+    
+- name: Generate bfc.properties for Dakota (default template)
+  template:
+    src: "{{ project_root }}/ansible/templates/dakota/bfc.properties.j2"
+    dest: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/webapps/TruckBuilder/WEB-INF/classes/bfc.properties"
+  register: bfc_properties_result_default
+  when: not version_specific_bfc_properties_template.stat.exists
+
+# VERSION-SPECIFIC FILES - Check for version-specific files that only exist in certain versions
+
+- name: Check if version has additional version-specific templates
+  find:
+    paths: "{{ project_root }}/ansible/templates/dakota/v{{ current_version }}"
+    patterns: "*.j2"
+    excludes: 
+      - "server.xml.j2"
+      - "mrcjava.xml.j2" 
+      - "mrc-spring-context.xml.j2"
+      - "bfc.properties.j2"
+  register: version_specific_files
+  when: version_specific_template.stat.exists or version_specific_mrcjava_template.stat.exists or version_specific_spring_template.stat.exists or version_specific_bfc_properties_template.stat.exists
+
+- name: Generate additional version-specific files
+  template:
+    src: "{{ item.path }}"
+    dest: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/{{ item.path | basename | regex_replace('\\.j2', '') }}"
+  loop: "{{ version_specific_files.files | default([]) }}"
+  register: additional_files_result
+  when: version_specific_files.matched | default(0) > 0
+
+# LIBRARY HANDLING - Process version-specific libraries
+
+- name: Create placeholder for version-specific libraries
+  file:
+    path: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/lib/{{ item }}"
+    state: touch
+    mode: '0644'
+  loop: "{{ dakota_version_vars.libraries | default([]) }}"
+  when: dakota_version_vars.libraries is defined
+
+- name: Create library documentation file
+  copy:
+    content: |
+      # Dakota Version {{ current_version }} Libraries
+      
+      This directory contains the following libraries for Dakota {{ current_version }}:
+      
+      {% for library in dakota_version_vars.libraries | default([]) %}
+      * {{ library }}
+      {% endfor %}
+      
+      When creating a complete package, these library placeholders should be replaced
+      with the actual JAR files from the corresponding Dakota {{ current_version }} release.
+    dest: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/lib/README.md"
+  when: dakota_version_vars.libraries is defined
+
+# Create additional directories for Dakota - helpful for complete package setup
+- name: Create additional Dakota directories
+  file:
+    path: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/{{ directory_path }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "BFCDakota/logs"
+    - "BFCDakota/temp"
+    - "BFCDakota/work"
+    - "BFCDakota/webapps"
+  loop_control:
+    loop_var: directory_path
+
+# VERSION-SPECIFIC SETTINGS FILE - Create a version info file
+- name: Create version info file
+  copy:
+    content: |
+      # Dakota {{ current_version }} Configuration for {{ client_id }}
+      # Generated on {{ ansible_date_time.date }} at {{ ansible_date_time.time }}
+      
+      # Version Information
+      version={{ current_version }}
+      generated_timestamp={{ ansible_date_time.epoch }}
+      client_id={{ client_id }}
+      
+      # Version-specific Settings
+      {% for key, value in dakota_version_vars.items() %}
+      {% if value is not mapping and value is not sequence %}
+      {{ key }}={{ value }}
+      {% endif %}
+      {% endfor %}
+      
+      # Feature Flags
+      {% for key, value in dakota_version_vars.items() %}
+      {% if value is boolean %}
+      feature.{{ key }}={{ value | lower }}
+      {% endif %}
+      {% endfor %}
+    dest: "{{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/BFCDakota/conf/version.properties"
+  when: dakota_version_vars is defined
+
+- name: Report generation status
+  debug:
+    msg:
+      - "Dakota Configuration Generation Report"
+      - "====================================="
+      - "Dakota Version: {{ current_version }}"
+      - "server.xml: {{ 'Generated successfully (version-specific)' if server_xml_result.changed|default(false) else 'Generated successfully (default)' if server_xml_result_default.changed|default(false) else 'No change' }}"
+      - "mrcjava.xml: {{ 'Generated successfully (version-specific)' if mrcjava_xml_result.changed|default(false) else 'Generated successfully (default)' if mrcjava_xml_result_default.changed|default(false) else 'No change' }}"
+      - "mrc-spring-context.xml: {{ 'Generated successfully (version-specific)' if mrc_spring_context_xml_result.changed|default(false) else 'Generated successfully (default)' if mrc_spring_context_xml_result_default.changed|default(false) else 'No change' }}"
+      - "bfc.properties: {{ 'Generated successfully (version-specific)' if bfc_properties_result.changed|default(false) else 'Generated successfully (default)' if bfc_properties_result_default.changed|default(false) else 'No change' }}"
+      - "Additional version-specific files: {{ additional_files_result.results | default([]) | selectattr('changed', 'defined') | selectattr('changed') | list | length }} files generated"
+      - "Libraries placeholder count: {{ dakota_version_vars.libraries | default([]) | length }}"
+      - "Generated files are in: {{ project_root }}/output/dakota/v{{ current_version }}/{{ client_id }}/"
+    verbosity: 1

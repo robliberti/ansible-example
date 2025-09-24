@@ -1,0 +1,78 @@
+---
+# Common Customer Information
+client_id: "TPC"
+client_id_lower: "tpc"
+client_id_upper: "TPC"
+
+# Database Configuration
+db_host: "127.0.0.1"
+db_username_prod: "bfcguiptpc"
+db_password_prod: "guitpcpwd"
+db_username_test: "bfcguittpc"
+db_password_test: "guitpcpwd"
+
+# Dakota Configuration - Common
+dakota_http_port: 19300
+dakota_shutdown_port: 19385
+dakota_redirect_port: 19383
+dakota_ajp_port: 19389
+dakota_tomcat_dirname: "Tomcat7082TPC19"
+
+# Dakota Configuration - Version Specific
+dakota_versions:
+  "7.8":
+    libraries_string: "BFCGLOTPCF,DKT78.0,TPCSQL,TPCSQLPGM,QGPL,QTEMP"
+    prod_libraries_string: "BFCGLOTPCF,TPCPIRMODS,TPCPIRF,DKT78.0,TPCSQL,TPCSQLPGM,QGPL,QTEMP"
+    test_libraries_string: "BFCGLOTPCF,TPCPIRTEMP,TPCPIRMODS,TPCPIRTSTF,DKT78.0,TPCSQL,TPCSQLPGM,QGPL,QTEMP"
+    program_library: "DKT78.0"
+  "7.9":
+    libraries_string: "BFCGLOTPCF,TPCDKT,TPCSQL,TPCSQLPGM,QGPL,QTEMP"
+    prod_libraries_string: "BFCGLOTPCF,TPCPIRMODS,TPCPIRF,TPCDKT,TPCSQL,TPCSQLPGM,QGPL,QTEMP"
+    test_libraries_string: "BFCGLOTPCF,TPCPIRTEMP,TPCPIRMODS,TPCPIRTSTF,TPCDKT,TPCSQL,TPCSQLPGM,QGPL,QTEMP"
+    program_library: "TPCDKT"
+
+# SelectPrime Configuration - Common  
+selectprime_http_port: 19600
+selectprime_shutdown_port: 19605
+selectprime_redirect_port: 19643
+selectprime_ajp_port: 19609
+selectprime_tomcat_dirname: "Tomcat7082TPCApps16"
+selectprime_config_host: "127.0.0.1"
+selectprime_program_library: "TPCAPPS"
+
+# SelectPrime Configuration - Version Specific
+selectprime_versions:
+  "1.0":
+    thread_pool_size: 100
+    app_features: "standard"
+
+# API Configuration - Common
+api_client_port_num: 19
+api_http_port: 19200
+api_shutdown_port: 19205
+api_redirect_port: 19243
+api_ajp_port: 19209
+api_test_http_port: 19220
+api_test_shutdown_port: 19225
+api_test_redirect_port: 19263
+api_test_ajp_port: 19229
+api_tomcat_dirname: "Tomcat7082TPC12Int"
+
+# API Configuration - Version Specific
+api_versions:
+  "1.0":
+    auth_method: "basic"
+    connection_timeout: 30000
+
+# Trax Configuration - Common
+trax_http_port: 19100
+trax_shutdown_port: 19185
+trax_redirect_port: 19183
+trax_ajp_port: 19189
+trax_tomcat_dirname: "Tomcat9073TPCTRAX19100"
+
+# Trax Configuration - Version Specific
+trax_versions:
+  "1.0":
+    cache_size: "512m"
+    max_connections: 50

@@ -1,0 +1,78 @@
+---
+# Common Customer Information
+client_id: "GSF"
+client_id_lower: "gsf"
+client_id_upper: "GSF"
+
+# Database Configuration
+db_host: "127.0.0.1"
+db_username_prod: "bfcguipgsf"
+db_password_prod: "guigsfpwd"
+db_username_test: "bfcguitgsf"
+db_password_test: "guigsfpwd"
+
+# Dakota Configuration - Common
+dakota_http_port: 11300
+dakota_shutdown_port: 11385
+dakota_redirect_port: 11383
+dakota_ajp_port: 11389
+dakota_tomcat_dirname: "Tomcat7082GSF11"
+
+# Dakota Configuration - Version Specific
+dakota_versions:
+  "7.8":
+    libraries_string: "BFCGLOGSFRF,DKT78.0,GSFSQL,GSFSQLPGM,QGPL,QTEMP"
+    prod_libraries_string: "BFCGLOGSFRF,GSFMODS001,GSFMODS,GSFRF,GSFFIX001,DKT78.0,GSFFIX,GSFSQL,GSFSQLPGM,QGPL,QTEMP"
+    test_libraries_string: "BFCGLOGSFRF,GSFTEMP,GSFFIXTST,GSFFIXTST1,DKT78.0,GSFFIX,GSFSQL,GSFSQLPGM,QGPL,QTEMP"
+    program_library: "DKT78.0"
+  "7.9":
+    libraries_string: "BFCGLOGSFRF,GSFFIX,GSFDKT,GSFSQL,GSFSQLPGM,QGPL,QTEMP"
+    prod_libraries_string: "BFCGLOGSFRF,GSFMODS001,GSFMODS,GSFRF,GSFFIX001,GSFDKT001,GSFFIX,GSFDKT,GSFSQL,GSFSQLPGM,QGPL,QTEMP"
+    test_libraries_string: "BFCGLOGSFRF,GSFTEMP,GSFFIXTST,GSFDKTTST,GSFTSTF,GSFFIXTST1,GSFDKTTST1,GSFFIX,GSFDKT,GSFSQL,GSFSQLPGM,QGPL,QTEMP"
+    program_library: "GSFDKT"
+
+# SelectPrime Configuration - Common  
+selectprime_http_port: 11600
+selectprime_shutdown_port: 11605
+selectprime_redirect_port: 11643
+selectprime_ajp_port: 11609
+selectprime_tomcat_dirname: "Tomcat7082GSFApps16"
+selectprime_config_host: "127.0.0.1"
+selectprime_program_library: "GSFAPPS"
+
+# SelectPrime Configuration - Version Specific
+selectprime_versions:
+  "1.0":
+    thread_pool_size: 100
+    app_features: "standard"
+
+# API Configuration - Common
+api_client_port_num: 11
+api_http_port: 11200
+api_shutdown_port: 11205
+api_redirect_port: 11243
+api_ajp_port: 11209
+api_test_http_port: 11220
+api_test_shutdown_port: 11225
+api_test_redirect_port: 11263
+api_test_ajp_port: 11229
+api_tomcat_dirname: "Tomcat7082GSF12Int"
+
+# API Configuration - Version Specific
+api_versions:
+  "1.0":
+    auth_method: "basic"
+    connection_timeout: 30000
+
+# Trax Configuration - Common
+trax_http_port: 11100
+trax_shutdown_port: 11185
+trax_redirect_port: 11183
+trax_ajp_port: 11189
+trax_tomcat_dirname: "Tomcat9073GSFTRAX11100"
+
+# Trax Configuration - Version Specific
+trax_versions:
+  "1.0":
+    cache_size: "512m"
+    max_connections: 50

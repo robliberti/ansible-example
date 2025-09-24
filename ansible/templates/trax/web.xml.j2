@@ -1,0 +1,240 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  BFC Revisions
+
+  12/18/17  DAS 7.10a
+    - Simplified directory definitions.
+    - Old code removed for clarity. See web.xml.bak2.
+-->
+<!--
+ DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS HEADER.
+
+ Copyright 1997-2007 Sun Microsystems, Inc. All rights reserved.
+
+ The contents of this file are subject to the terms of either the GNU
+ General Public License Version 2 only ("GPL") or the Common
+ Development and Distribution License("CDDL") (collectively, the
+ "License"). You may not use this file except in compliance with the
+ License. You can obtain a copy of the License at
+ http://www.netbeans.org/cddl-gplv2.html
+ or nbbuild/licenses/CDDL-GPL-2-CP. See the License for the
+ specific language governing permissions and limitations under the
+ License.  When distributing the software, include this License Header
+ Notice in each file and include the License file at
+ nbbuild/licenses/CDDL-GPL-2-CP.  Sun designates this
+ particular file as subject to the "Classpath" exception as provided
+ by Sun in the GPL Version 2 section of the License file that
+ accompanied this code. If applicable, add the following below the
+ License Header, with the fields enclosed by brackets [] replaced by
+ your own identifying information:
+ "Portions Copyrighted [year] [name of copyright owner]"
+
+ Contributor(s):
+
+ The Original Software is NetBeans. The Initial Developer of the Original
+ Software is Sun Microsystems, Inc. Portions Copyright 1997-2007 Sun
+ Microsystems, Inc. All Rights Reserved.
+
+ If you wish your version of this file to be governed by only the CDDL
+ or only the GPL Version 2, indicate your decision by adding
+ "[Contributor] elects to include this software in this distribution
+ under the [CDDL or GPL Version 2] license." If you do not indicate a
+ single choice of license, a recipient has the option to distribute
+ your version of this file under either the CDDL, the GPL Version 2 or
+ to extend the choice of license to its licensees as provided above.
+ However, if you add GPL Version 2 code and therefore, elected the GPL
+ Version 2 license, then the option applies only if the new code is
+ made subject to such option by the copyright holder.
+-->
+<web-app version="2.5" xmlns="http://java.sun.com/xml/ns/javaee" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://java.sun.com/xml/ns/javaee http://java.sun.com/xml/ns/javaee/web-app_2_5.xsd">
+    <description>BFC Associates © 2009-2017.  BFC Trax Point of Delivery System</description>
+<!--    <display-name>BFCTraxWS v2.0.0.0 RESTful Production Environment</display-name> -->
+<!--    <display-name>BFCTraxWS v2.0.0.0 RESTful Test Environment</display-name> -->
+        <display-name>BFCTraxWS v2.0.0.0 RESTful Development Environment</display-name>
+    <listener>
+        <description>Is called when the web application is started.  Holds the parameters that are in the web.xml for how the web service should operate.</description>
+        <listener-class>com.bfc.trax.WebAppListener</listener-class>
+    </listener>
+    <listener>
+        <description>Is called when a session is created and destroyed.</description>
+        <listener-class>com.bfc.trax.SessionCleanupListener</listener-class>
+    </listener>
+    <servlet>
+        <servlet-name>ServletAdaptor</servlet-name>
+        <servlet-class>com.sun.jersey.spi.container.servlet.ServletContainer</servlet-class>
+        <load-on-startup>1</load-on-startup>
+    </servlet>
+<!--<servlet>
+    <servlet-name>Jersey REST Service</servlet-name>
+    <servlet-class>org.glassfish.jersey.servlet.ServletContainer</servlet-class>
+    <init-param>
+      <param-name>org.glassfish.jersey.config.property.packages</param-name>
+      <param-value>com.practise.rest</param-value>
+    </init-param>
+    <load-on-startup>1</load-on-startup>
+  </servlet> -->
+    <servlet>
+        <servlet-name>ImageServlet</servlet-name>
+        <servlet-class>com.bfc.trax.ImageServlet</servlet-class>
+    </servlet>
+    <servlet-mapping>
+        <servlet-name>ServletAdaptor</servlet-name>
+        <url-pattern>/resources/*</url-pattern>
+    </servlet-mapping>
+    <servlet-mapping>
+        <servlet-name>ImageServlet</servlet-name>
+        <url-pattern>/images/*</url-pattern>
+    </servlet-mapping>
+    <session-config>
+        <session-timeout>30</session-timeout>
+    </session-config>
+    <welcome-file-list>
+        <welcome-file>index.jsp</welcome-file>
+    </welcome-file-list>
+<!-- ************************************************************************************** -->
+    <env-entry>
+        <description>This options tells if the picture data should be stripped from the XML file (Y/N)</description>
+        <env-entry-name>{{ client_id }}TraxXMLRemovePicture</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>N</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>Base Trax directory for Windows ({{ client_id }}Trax, {{ client_id }}TraxDev, ...). Include slash at end.</description>
+        <env-entry-name>{{ client_id }}TraxDirectoryWin</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>c:\{{ client_id }}Trax\</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>Base Trax directory ({{ client_id }}Trax, {{ client_id }}TraxDev, ...). Include slash at end.</description>
+        <env-entry-name>{{ client_id }}TraxDirectory</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>/{{ client_id }}Trax/</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>Default User ID used when {{ client_id }}TraxLogin is set to DEFAULT.    Replace {{ client_id_lower }}trax with {{ client_id_lower }}traxtst for the TEST System.  Replace {{ client_id_lower }}trax with {{ client_id_lower }}traxdev for the DEV System</description>
+        <env-entry-name>{{ client_id }}TraxDefaultUID</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>{{ client_id_lower }}trax</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>Default Password used when {{ client_id }}TraxLogin is set to DEFAULT.  Replace {{ client_id_lower }}trax75pwd with {{ client_id_lower }}trax75pwtst for the TEST System.  Replace {{ client_id_lower }}trax75pwd with {{ client_id_lower }}trax75pwdev for the DEV System</description>
+        <env-entry-name>{{ client_id }}TraxDefaultPID</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>{{ client_id_lower }}trax75pwd</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>The IP address of the AS400 to log into.  Be sure to change this to the customer's IP</description>
+        <env-entry-name>{{ client_id }}TraxLoginIP</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>127.0.0.1</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>The port that the application server is running on.  Be sure to change this to the customer's port.  Usually 7070</description>
+        <env-entry-name>{{ client_id }}TraxPort</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>{{ trax_http_port }}</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>The connection string for the jdbc driver used to connect to the data base</description>
+        <env-entry-name>{{ client_id }}TraxJDBCConnectionString</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>jdbc:as400://127.0.0.1;naming=system</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>The class name for the jdbc driver used to connect to the data base</description>
+        <env-entry-name>{{ client_id }}TraxJDBCClass</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>com.ibm.as400.access.AS400JDBCDriver</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>The directory where the web services writes the picture data.</description>
+        <env-entry-name>{{ client_id }}TraxPictureDirectory</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>Pictures</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>The sub-directory of {{ client_id }}TraxPictureDirectory where the web services writes the jpeg picture data.</description>
+        <env-entry-name>{{ client_id }}TraxPictureJpgDirectory</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>JPG</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>The sub-directory of {{ client_id }}TraxPictureDirectory where the web services writes the tiff picture data.</description>
+        <env-entry-name>{{ client_id }}TraxPictureTiffDirectory</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>TIFF</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>The directory where the web services writes the log data.</description>
+        <env-entry-name>{{ client_id }}TraxLogDirectoryWin</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>Logs</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>The directory where the web services reads the Trax Updates.</description>
+        <env-entry-name>{{ client_id }}TraxUpdateDirectory</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>Update</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>This string holds the route portion of the file name.  The file name will appears as DriverID_RouteID_RTE.xml i.e.: 999_123456_RTE.xml</description>
+        <env-entry-name>{{ client_id }}TraxRouteFile</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>_RTE</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>This string holds the epm portion of the file name.  The file name will appears as DriverID_RouteID_EPM.xml i.e.: 999_123456_EPM.xml</description>
+        <env-entry-name>{{ client_id }}TraxEPMFile</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>_EPM</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>This string holds the completed portion of the file name.  The file name will appears as DriverID_RouteID_CMP.xml i.e.: 999_123456_CMP.xml</description>
+        <env-entry-name>{{ client_id }}TraxCompletedFile</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>_CMP</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>This string holds the process used to get the route data from the host system.  FILE means that a file is read from the specified directories.</description>
+        <env-entry-name>{{ client_id }}TraxXMLProcess</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>FILE</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>This string holds how user login is performed.  The values are OPEN [no password required, just employee id], EMP_ID [employee id is used for both user id and password], CLOSED [Must have valid user id and password], DEFAULT [use default user id: {{ client_id_lower }}trax, password: {{ client_id_lower }}trax75pwd]</description>
+        <env-entry-name>{{ client_id }}TraxLogin</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>EMP_ID</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>Set the language so we know the language to use for the error messages.  Default will be english.</description>
+        <env-entry-name>{{ client_id }}TraxLanguage</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>ENGLISH</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>The Trax Support directory where clients can upload SAVE files to be analyzed</description>
+        <env-entry-name>{{ client_id }}TraxSupportDirectory</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>/{{ client_id }}TraxSupport/</env-entry-value>
+    </env-entry>
+    <env-entry>
+        <description>The Trax Support directory on Windows where clients can upload SAVE files to be analyzed</description>
+        <env-entry-name>{{ client_id }}TraxSupportDirectoryWin</env-entry-name>
+        <env-entry-type>java.lang.String</env-entry-type>
+        <env-entry-value>c:\{{ client_id }}TraxSupport\</env-entry-value>
+    </env-entry>
+<!-- ************************************************************************************** -->
+    <mime-mapping>
+        <extension>cab</extension>
+        <mime-type>application/x-cab-compressed</mime-type>
+    </mime-mapping>
+    <mime-mapping>
+        <extension>CAB</extension>
+        <mime-type>application/x-cab-compressed</mime-type>
+    </mime-mapping>
+    <mime-mapping>
+        <extension>Cab</extension>
+        <mime-type>application/x-cab-compressed</mime-type>
+    </mime-mapping>
+</web-app>

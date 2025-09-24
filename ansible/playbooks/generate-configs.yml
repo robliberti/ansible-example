@@ -1,0 +1,109 @@
+---
+- name: Generate Java Configuration Files
+  hosts: localhost
+  gather_facts: yes
+  vars:
+    project_root: "{{ playbook_dir | dirname | dirname }}"
+    
+  tasks:
+    - name: Display playbook execution details
+      debug:
+        msg:
+          - "Generating Java Configuration Files"
+          - "==================================="
+          - "Customer: {{ customer | default('all') }}"
+          - "Products: {{ products | default('all') }}"
+          - "Project Root: {{ project_root }}"
+          - "Versions: {{ versions | default('using defaults') }}"
+
+    - name: Set products list
+      set_fact:
+        products_list: "{{ products.split(',') | map('trim') | list if products != 'all' else ['dakota', 'selectprime', 'api', 'trax'] }}"
+
+    # Parse version information into a dictionary
+    - name: Parse version information
+      set_fact:
+        version_dict: >-
+          {%- set version_dict = {} -%}
+          {%- if versions is defined and versions != '' -%}
+            {%- for version_pair in versions.split(',') -%}
+              {%- set product_version = version_pair.split('=') -%}
+              {%- set _ = version_dict.update({product_version[0]: product_version[1]}) -%}
+            {%- endfor -%}
+          {%- endif -%}
+          {{ version_dict | combine({
+            'dakota': version_dict.get('dakota', '7.9'),
+            'selectprime': version_dict.get('selectprime', '3.5'),
+            'api': version_dict.get('api', '2.0'),
+            'trax': version_dict.get('trax', '1.0')
+          }) }}
+
+    - name: Display product versions
+      debug:
+        msg:
+          - "Product Versions:"
+          - "Dakota: {{ version_dict.dakota }}"
+          - "SelectPrime: {{ version_dict.selectprime }}"
+          - "API: {{ version_dict.api }}"
+          - "Trax: {{ version_dict.trax }}"
+
+    - name: Get all customer files when processing all
+      find:
+        paths: "{{ project_root }}/ansible/group_vars"
+        patterns: "*.yml"
+      register: customer_files
+      when: customer == 'all'
+
+    - name: Set customer list when processing all
+      set_fact:
+        customer_list: "{{ customer_files.files | map(attribute='path') | map('basename') | map('regex_replace', '\\.yml$', '') | list }}"
+      when: customer == 'all'
+
+    - name: Set customer list when processing specific customer
+      set_fact:
+        customer_list: ["{{ customer }}"]
+      when: customer != 'all'
+
+    - name: Display customers to process
+      debug:
+        msg: "Processing customers: {{ customer_list | join(', ') }}"
+
+    - name: Generate Dakota configs
+      include_tasks: generate-dakota-configs.yml
+      vars:
+        current_customer: "{{ item }}"
+        current_version: "{{ version_dict.dakota }}"
+      with_items: "{{ customer_list }}"
+      when: "'dakota' in products_list"
+
+    - name: Generate SelectPrime configs
+      include_tasks: generate-selectprime-configs.yml
+      vars:
+        current_customer: "{{ item }}"
+        current_version: "{{ version_dict.selectprime }}"
+      with_items: "{{ customer_list }}"
+      when: "'selectprime' in products_list"
+
+    - name: Generate API configs
+      include_tasks: generate-api-configs.yml
+      vars:
+        current_customer: "{{ item }}"
+        current_version: "{{ version_dict.api }}"
+      with_items: "{{ customer_list }}"
+      when: "'api' in products_list"
+
+    - name: Generate Trax configs
+      include_tasks: generate-trax-configs.yml
+      vars:
+        current_customer: "{{ item }}"
+        current_version: "{{ version_dict.trax }}"
+      with_items: "{{ customer_list }}"
+      when: "'trax' in products_list"
+
+    - name: Display completion message
+      debug:
+        msg:
+          - "Configuration generation completed successfully!"
+          - "Generated configs for customers: {{ customer_list | join(', ') }}"
+          - "Products: {{ products_list | join(', ') }}"
+          - "Check output/ directory for generated files"

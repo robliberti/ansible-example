@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE beans PUBLIC "-//SPRING//DTD BEAN//EN" "http://www.springframework.org/dtd/spring-beans.dtd">
+<beans default-autowire="no" default-dependency-check="none" default-lazy-init="false">
+<!-- 1. AS400 DB2 remote -->
+<!-- 1. AS400 DB2 remote - as400_remote_BFCGLOBAL -->
+<bean abstract="false" autowire="default" class="org.apache.commons.dbcp.BasicDataSource" dependency-check="default" id="as400_remote_BFCGLOBAL" lazy-init="true" singleton="true">
+  <property name="driverClassName"> <value>com.ibm.as400.access.AS400JDBCDriver</value> </property>
+  <property name="url"> <value>jdbc:as400://{{ db_host | default('127.0.0.1') }};naming=system;libraries={{ dakota_version_vars.libraries_string }};translate binary=true</value> </property>
+  <property name="username"> <value>{{ db_username_prod }}</value> </property>
+  <property name="password"> <value>{{ db_password_prod }}</value> </property>
+</bean>
+<!-- 1. AS400 DB2 remote - as400_remote_PROD001 -->
+<bean abstract="false" autowire="default" class="org.apache.commons.dbcp.BasicDataSource" dependency-check="default" id="as400_remote_PROD001" lazy-init="true" singleton="true">
+  <property name="driverClassName"> <value>com.ibm.as400.access.AS400JDBCDriver</value> </property>
+  <property name="url"> <value>jdbc:as400://{{ db_host | default('127.0.0.1') }};naming=system;libraries={{ dakota_version_vars.prod_libraries_string }};translate binary=true</value> </property>
+  <property name="username"> <value>{{ db_username_prod }}</value> </property>
+  <property name="password"> <value>{{ db_password_prod }}</value> </property>
+</bean>
+<!-- 1. AS400 DB2 remote - as400_remote_TEST001 -->
+<bean abstract="false" autowire="default" class="org.apache.commons.dbcp.BasicDataSource" dependency-check="default" id="as400_remote_TEST001" lazy-init="true" singleton="true">
+  <property name="driverClassName"> <value>com.ibm.as400.access.AS400JDBCDriver</value> </property>
+  <property name="url"> <value>jdbc:as400://{{ db_host | default('127.0.0.1') }};naming=system;libraries={{ dakota_version_vars.test_libraries_string }};translate binary=true</value> </property>
+  <property name="username"> <value>{{ db_username_test }}</value> </property>
+  <property name="password"> <value>{{ db_password_test }}</value> </property>
+</bean>
+<!-- 0. AS400 DB2 local -->
+<bean abstract="false" autowire="default" class="org.apache.commons.dbcp.BasicDataSource" dependency-check="default" id="as400_local1" lazy-init="true" singleton="true">
+  <property name="driverClassName"> <value>com.ibm.db2.jdbc.app.DB2Driver</value> </property>
+  <property name="url"> <value>jdbc:db2://*LOCAL;translate binary=true</value> </property>
+  <property name="username"> <value>DAKOTA</value> </property>
+  <property name="password"> <value>DAKOTA</value> </property>
+</bean>
+</beans>

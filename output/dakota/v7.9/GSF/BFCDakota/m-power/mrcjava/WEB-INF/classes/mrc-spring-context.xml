@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE beans PUBLIC "-//SPRING//DTD BEAN//EN" "http://www.springframework.org/dtd/spring-beans.dtd">
+<beans default-autowire="no" default-dependency-check="none" default-lazy-init="false">
+<!-- 1. AS400 DB2 remote -->
+<!-- 1. AS400 DB2 remote - as400_remote_BFCGLOBAL -->
+<bean abstract="false" autowire="default" class="org.apache.commons.dbcp.BasicDataSource" dependency-check="default" id="as400_remote_BFCGLOBAL" lazy-init="true" singleton="true">
+  <property name="driverClassName"> <value>com.ibm.as400.access.AS400JDBCDriver</value> </property>
+  <property name="url"> <value>jdbc:as400://127.0.0.1;naming=system;libraries=BFCGLOGSFRF,GSFFIX,GSFDKT,GSFSQL,GSFSQLPGM,QGPL,QTEMP;translate binary=true</value> </property>
+  <property name="username"> <value>bfcguipgsf</value> </property>
+  <property name="password"> <value>guigsfpwd</value> </property>
+</bean>
+<!-- 1. AS400 DB2 remote - as400_remote_PROD001 -->
+<bean abstract="false" autowire="default" class="org.apache.commons.dbcp.BasicDataSource" dependency-check="default" id="as400_remote_PROD001" lazy-init="true" singleton="true">
+  <property name="driverClassName"> <value>com.ibm.as400.access.AS400JDBCDriver</value> </property>
+  <property name="url"> <value>jdbc:as400://127.0.0.1;naming=system;libraries=BFCGLOGSFRF,GSFMODS001,GSFMODS,GSFRF,GSFFIX001,GSFDKT001,GSFFIX,GSFDKT,GSFSQL,GSFSQLPGM,QGPL,QTEMP;translate binary=true</value> </property>
+  <property name="username"> <value>bfcguipgsf</value> </property>
+  <property name="password"> <value>guigsfpwd</value> </property>
+</bean>
+<!-- 1. AS400 DB2 remote - as400_remote_TEST001 -->
+<bean abstract="false" autowire="default" class="org.apache.commons.dbcp.BasicDataSource" dependency-check="default" id="as400_remote_TEST001" lazy-init="true" singleton="true">
+  <property name="driverClassName"> <value>com.ibm.as400.access.AS400JDBCDriver</value> </property>
+  <property name="url"> <value>jdbc:as400://127.0.0.1;naming=system;libraries=BFCGLOGSFRF,GSFTEMP,GSFFIXTST,GSFDKTTST,GSFTSTF,GSFFIXTST1,GSFDKTTST1,GSFFIX,GSFDKT,GSFSQL,GSFSQLPGM,QGPL,QTEMP;translate binary=true</value> </property>
+  <property name="username"> <value>bfcguitgsf</value> </property>
+  <property name="password"> <value>guigsfpwd</value> </property>
+</bean>
+<!-- 0. AS400 DB2 local -->
+<bean abstract="false" autowire="default" class="org.apache.commons.dbcp.BasicDataSource" dependency-check="default" id="as400_local1" lazy-init="true" singleton="true">
+  <property name="driverClassName"> <value>com.ibm.db2.jdbc.app.DB2Driver</value> </property>
+  <property name="url"> <value>jdbc:db2://*LOCAL;translate binary=true</value> </property>
+  <property name="username"> <value>DAKOTA</value> </property>
+  <property name="password"> <value>DAKOTA</value> </property>
+</bean>
+</beans>

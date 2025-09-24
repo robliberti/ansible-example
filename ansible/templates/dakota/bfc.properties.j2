@@ -1,0 +1,32 @@
+# BFC Truck Builder Drag and Drop Options
+#   WEB is used when truckbuilder is under webfacing
+#   MRC is when truckbuilder is used with MRC
+BFC_WEB_INTERFACE=MRC
+#   BFC_USER the username login if you are not using a login screen or if you
+#   need to hard code the login name.  Should stay commented out.
+#BFC_USER=
+#   BFC_PASSWORD the login password if you are not using a login screen or if
+#   you need to hard code the login information.   Should stay commented out.
+#BFC_PASSWORD=
+#   BFC_CLASS is the java class of the jdbc driver
+#   BFC_CONNECTION_STRING is the connection string to be used with the jdbc driver
+#
+#DB2 BFCDev2 connection
+#BFC_CLASS=com.ibm.db2.jdbc.app.DB2Driver
+#BFC_CONNECTION_STRING=jdbc:db2://173.15.82.115
+#
+#AS400 BFCDev2 connection
+BFC_CLASS=com.ibm.as400.access.AS400JDBCDriver
+BFC_CONNECTION_STRING=jdbc:as400://{{ db_host | default('127.0.0.1') }}
+#
+#BFC_SQL_LIBRARY holds the SQL library to use for getting the correct library list
+BFC_SQL_LIBRARY={{ client_id_upper }}SQL
+#BFC_SQL_PROGRAM_LIBRARY holds the SQL program library to use for getting the correct library list
+BFC_SQL_PROGRAM_LIBRARY={{ dakota_versions[current_version].program_library }}
+#
+# PC PATH WHEN RUNNING UNDER NETBEANS
+#BFC_SPRING_XML_PATH=..\\BFCDakota\\m-power\\mrcjava\\WEB-INF\\classes\\mrc-spring-context.xml
+#BFC_SPRING_XML_CLUSTER_PATH=..\\N1\\BFCDakota\\m-power\\mrcjava\\WEB-INF\\classes\\mrc-spring-context.xml
+# AS400/PC PROCDUCTION PATH
+BFC_SPRING_XML_PATH=/{{ dakota_tomcat_dirname }}/BFCDakota/m-power/mrcjava/WEB-INF/classes/mrc-spring-context.xml
+BFC_SPRING_XML_CLUSTER_PATH=/{{ dakota_tomcat_dirname }}/N1/BFCDakota/m-power/mrcjava/WEB-INF/classes/mrc-spring-context.xml

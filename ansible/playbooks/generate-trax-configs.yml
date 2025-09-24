@@ -1,0 +1,85 @@
+---
+# Tasks for generating Trax configuration files
+# This is not a standalone playbook but is included from the main playbook
+
+- name: Load customer variables
+  include_vars:
+    file: "{{ playbook_dir }}/../group_vars/{{ current_customer }}.yml"
+    
+- name: Display Trax generation info
+  debug:
+    msg:
+      - "Trax Config Generation for {{ client_id }}"
+      - "====================================="
+      - "Client ID: {{ client_id }}"
+      - "Tomcat directory: {{ trax_tomcat_dirname }}"
+      - "Version: {{ current_version }}"
+    verbosity: 1
+
+- name: Ensure output directories exist for Trax with version
+  file:
+    path: "{{ project_root }}/output/trax/v{{ current_version }}/{{ client_id }}/{{ directory_path }}"
+    state: directory
+  loop:
+    - "BFCTrax/conf"
+    - "BFCTrax/webapps/BFCTraxWS/WEB-INF"
+  loop_control:
+    loop_var: directory_path
+    
+- name: Generate server.xml for Trax
+  template:
+    src: "{{ project_root }}/ansible/templates/trax/server.xml.j2"
+    dest: "{{ project_root }}/output/trax/v{{ current_version }}/{{ client_id }}/BFCTrax/conf/server.xml"
+  register: server_xml_result
+    
+- name: Generate web.xml for Trax
+  template:
+    src: "{{ project_root }}/ansible/templates/trax/web.xml.j2"
+    dest: "{{ project_root }}/output/trax/v{{ current_version }}/{{ client_id }}/BFCTrax/webapps/BFCTraxWS/WEB-INF/web.xml"
+  register: web_xml_result
+
+# Create Trax directory structure with version
+- name: Create Trax directory structure
+  file:
+    path: "{{ project_root }}/output/trax/v{{ current_version }}/{{ client_id }}/{{ directory_path }}"
+    state: directory
+    mode: '0777'
+  loop:
+    - "{{ client_id }}TraxSupport"
+    - "{{ client_id }}Trax/Update"
+    - "{{ client_id }}Trax/Pictures/TIFF"
+    - "{{ client_id }}Trax/Pictures/JPG/OnOrder"
+    - "{{ client_id }}Trax/Logs"
+    - "{{ client_id }}Trax/Archive/Pictures/JPG/OnOrder"
+    - "{{ client_id }}Trax/Archive/Pictures/TIFF"
+    - "BFCTrax/logs"
+    - "BFCTrax/temp"
+    - "BFCTrax/work"
+    - "BFCTrax/webapps"
+  loop_control:
+    loop_var: directory_path
+
+- name: Create version info file
+  copy:
+    content: |
+      # Trax Configuration Version Information
+      product=Trax
+      version={{ current_version }}
+      customer={{ client_id }}
+      generated_date={{ ansible_date_time.iso8601 }}
+      generated_by=bfc-java-config-automation
+      tomcat_directory={{ trax_tomcat_dirname }}
+      http_port={{ trax_http_port }}
+      shutdown_port={{ trax_shutdown_port }}
+    dest: "{{ project_root }}/output/trax/v{{ current_version }}/{{ client_id }}/BFCTrax/conf/version.properties"
+
+- name: Report generation status
+  debug:
+    msg:
+      - "Trax Configuration Generation Report"
+      - "====================================="
+      - "Trax Version: {{ current_version }}"
+      - "server.xml: {{ 'Generated successfully' if server_xml_result.changed else 'No change' }}"
+      - "web.xml: {{ 'Generated successfully' if web_xml_result.changed else 'No change' }}"
+      - "Generated files are in: {{ project_root }}/output/trax/v{{ current_version }}/{{ client_id }}/"
+    verbosity: 1

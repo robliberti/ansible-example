@@ -1,0 +1,421 @@
+---
+# Playbook: validate-configs.yml
+# Purpose: Validates generated configuration files for correctness
+# Usage: ansible-playbook validate-configs.yml -e "customer=fdr products=dakota versions=dakota=7.9"
+
+- name: Validate generated configuration files
+  hosts: localhost
+  gather_facts: false
+  vars:
+    project_root: "{{ lookup('env', 'PROJECT_ROOT') | default(playbook_dir ~ '/../../') }}"
+    output_dir: "{{ project_root }}/output"
+    validation_errors: []
+    validation_warnings: []
+    validation_success: []
+    customer: "{{ customer | default('all') }}"
+    products: "{{ products | default('all') }}"
+    versions: "{{ versions | default('dakota=7.9,selectprime=3.5,api=2.0,trax=1.0') }}"
+    product_list: []
+    # Fixed: Remove the recursive template reference
+    verbose_mode: "{{ verbose | default(false) | bool }}"
+    
+  tasks:
+    - name: Parse version information
+      set_fact:
+        version_dict: >-
+          {% set version_map = {} %}
+          {% for version_item in versions.split(',') %}
+            {% set version_parts = version_item.split('=') %}
+            {% if version_parts | length == 2 %}
+              {% set _ = version_map.update({version_parts[0]: version_parts[1]}) %}
+            {% endif %}
+          {% endfor %}
+          {{ version_map }}
+
+    - name: Display product versions
+      debug:
+        msg: 
+          - "Product Versions for Validation:"
+          - "Dakota: {{ version_dict.dakota | default('7.9') }}"
+          - "SelectPrime: {{ version_dict.selectprime | default('3.5') }}"
+          - "API: {{ version_dict.api | default('2.0') }}"
+          - "Trax: {{ version_dict.trax | default('1.0') }}"
+        verbosity: 1
+
+    - name: Get list of customers to validate
+      set_fact:
+        customer_list: "{{ [customer] if customer != 'all' else [] }}"
+      when: customer is defined and customer != ''
+
+    - name: Load customer variables for specified customer
+      include_vars: "{{ project_root }}/ansible/group_vars/{{ item }}.yml"
+      loop: "{{ customer_list }}"
+      register: loaded_vars
+      
+    - name: Find all generated XML files - hierarchical structure
+      find:
+        paths: "{{ output_dir }}"
+        patterns: "*.xml"
+        recurse: yes
+      register: xml_files
+
+    # Extract customer IDs from file paths in the hierarchical structure
+    - name: Extract customer IDs from file paths (hierarchical)
+      set_fact:
+        extracted_customer: "{{ item.path | regex_search('/dakota/v[^/]+/([^/]+)/', '\\1') | default([]) }}"
+      loop: "{{ xml_files.files }}"
+      register: customer_extraction_hierarchical
+      when: "'/dakota/v' in item.path"
+
+    # Extract customer IDs from file paths in the legacy structure (fallback)
+    - name: Extract customer IDs from file paths (legacy)
+      set_fact:
+        extracted_customer: "{{ item.path | regex_search('/dakota/([^/]+)/', '\\1') | default([]) }}"
+      loop: "{{ xml_files.files }}"
+      register: customer_extraction_legacy
+      when: "'/dakota/' in item.path and '/dakota/v' not in item.path"
+
+    - name: Get unique customer IDs from hierarchical structure
+      set_fact:
+        hierarchical_customers: "{{ customer_extraction_hierarchical.results | selectattr('ansible_facts', 'defined') | map(attribute='ansible_facts.extracted_customer') | flatten | unique | map('upper') | list }}"
+      when: customer_extraction_hierarchical.results | selectattr('ansible_facts', 'defined') | list | length > 0
+
+    - name: Get unique customer IDs from legacy structure
+      set_fact:
+        legacy_customers: "{{ customer_extraction_legacy.results | selectattr('ansible_facts', 'defined') | map(attribute='ansible_facts.extracted_customer') | flatten | unique | map('upper') | list }}"
+      when: customer_extraction_legacy.results | selectattr('ansible_facts', 'defined') | list | length > 0
+
+    - name: Combine customer IDs from both structures
+      set_fact:
+        all_customers: "{{ (hierarchical_customers | default([])) + (legacy_customers | default([])) | unique | list }}"
+
+    - name: Display all detected customers
+      debug:
+        msg: "Detected customers in output files: {{ all_customers }}"
+      when: verbose_mode and all_customers is defined
+
+    - name: Load variables for additional detected customers
+      include_vars: "{{ project_root }}/ansible/group_vars/{{ item }}.yml"
+      loop: "{{ all_customers | default([]) }}"
+      when: item not in customer_list
+      
+    - name: Set files to validate
+      set_fact:
+        files_to_validate: "{{ xml_files.files }}"
+
+    - name: Display found files
+      debug:
+        msg: "Found {{ files_to_validate | length }} XML files to validate"
+
+    - name: Ensure required Python packages are installed
+      pip:
+        name: lxml
+        state: present
+      become: false
+      register: pip_result
+      ignore_errors: true
+      
+    - name: Display warning if lxml installation fails
+      debug:
+        msg: "Warning: Failed to install lxml Python package. Full XML validation will not be available. Consider installing manually with: pip install lxml"
+      when: pip_result.failed | default(false)
+
+    - name: Validate XML well-formedness
+      command: "xmllint --noout {{ item.path }}"
+      loop: "{{ files_to_validate }}"
+      register: xmllint_results
+      failed_when: false
+      
+    - name: Record validation errors
+      set_fact:
+        validation_errors: "{{ validation_errors + [{'file': item.item.path, 'error': item.stderr}] }}"
+      loop: "{{ xmllint_results.results }}"
+      when: item.failed is defined and item.failed
+
+    # Process Dakota files - hierarchical structure first
+    - name: Extract Dakota server.xml paths (hierarchical)
+      set_fact:
+        dakota_server_files_hierarchical: "{{ files_to_validate | selectattr('path', 'search', '/dakota/v[^/]+/.*?/conf/server.xml') | list }}"
+
+    # Process Dakota files - legacy structure as fallback
+    - name: Extract Dakota server.xml paths (legacy)
+      set_fact:
+        dakota_server_files_legacy: "{{ files_to_validate | selectattr('path', 'search', '/dakota/(?!v[^/]+).*?/conf/server.xml') | list }}"
+
+    - name: Verify Dakota HTTP port configuration (hierarchical)
+      block:
+        - name: Extract customer ID for Dakota files (hierarchical)
+          set_fact:
+            file_customer: "{{ item.path | regex_search('/dakota/v[^/]+/([^/]+)/', '\\1') | upper }}"
+            file_version: "{{ item.path | regex_search('/dakota/v([^/]+)/', '\\1') }}"
+          loop: "{{ dakota_server_files_hierarchical }}"
+          register: dakota_hierarchical_customers
+          
+        - name: Display Dakota hierarchical structure for debugging
+          debug:
+            msg: "Dakota file path: {{ item.item.path }}, extracted customer: {{ item.ansible_facts.file_customer }}, version: {{ item.ansible_facts.file_version }}"
+          loop: "{{ dakota_hierarchical_customers.results }}"
+          when: verbose_mode
+          
+        - name: Verify Dakota HTTP port for each file (hierarchical)
+          shell: "grep -q 'port=\"{{ lookup('vars', item.ansible_facts.file_customer[0] | lower + '_dakota_http_port', default='11300') }}\"' {{ item.item.path }}"
+          loop: "{{ dakota_hierarchical_customers.results }}"
+          register: dakota_port_check_hierarchical
+          failed_when: false
+          
+        - name: Display port verification results (hierarchical)
+          debug:
+            msg: "Checking {{ item.item.item.path }} for port {{ lookup('vars', item.item.ansible_facts.file_customer[0] | lower + '_dakota_http_port', default='11300') }}, result: {{ 'Success' if item.rc == 0 else 'Failed' }}"
+          loop: "{{ dakota_port_check_hierarchical.results }}"
+          when: verbose_mode
+          
+        - name: Record Dakota port validation errors (hierarchical)
+          set_fact:
+            validation_errors: "{{ validation_errors + [{'file': item.item.item.path, 'error': 'Dakota HTTP port configuration not found or incorrect'}] }}"
+          loop: "{{ dakota_port_check_hierarchical.results }}"
+          when: item.rc is defined and item.rc != 0
+      when: "'dakota' in products or products == 'all' and dakota_server_files_hierarchical is defined and dakota_server_files_hierarchical | length > 0"
+
+    - name: Verify Dakota HTTP port configuration (legacy)
+      block:
+        - name: Extract customer ID for Dakota files (legacy)
+          set_fact:
+            file_customer: "{{ item.path | regex_search('/dakota/([^/]+)/', '\\1') | upper }}"
+          loop: "{{ dakota_server_files_legacy }}"
+          register: dakota_legacy_customers
+          
+        - name: Display Dakota legacy structure for debugging
+          debug:
+            msg: "Dakota file path: {{ item.item.path }}, extracted customer: {{ item.ansible_facts.file_customer }}"
+          loop: "{{ dakota_legacy_customers.results }}"
+          when: verbose_mode
+          
+        - name: Verify Dakota HTTP port for each file (legacy)
+          shell: "grep -q 'port=\"{{ lookup('vars', item.ansible_facts.file_customer[0] | lower + '_dakota_http_port', default='11300') }}\"' {{ item.item.path }}"
+          loop: "{{ dakota_legacy_customers.results }}"
+          register: dakota_port_check_legacy
+          failed_when: false
+          
+        - name: Record Dakota port validation errors (legacy)
+          set_fact:
+            validation_errors: "{{ validation_errors + [{'file': item.item.item.path, 'error': 'Dakota HTTP port configuration not found or incorrect'}] }}"
+          loop: "{{ dakota_port_check_legacy.results }}"
+          when: item.rc is defined and item.rc != 0
+      when: "'dakota' in products or products == 'all' and dakota_server_files_legacy is defined and dakota_server_files_legacy | length > 0"
+      
+    # Process SelectPrime files - hierarchical structure
+    - name: Extract SelectPrime server.xml paths (hierarchical)
+      set_fact:
+        selectprime_server_files_hierarchical: "{{ files_to_validate | selectattr('path', 'search', '/selectprime/v[^/]+/.*?/conf/server.xml') | list }}"
+
+    # Process SelectPrime files - legacy structure
+    - name: Extract SelectPrime server.xml paths (legacy)
+      set_fact:
+        selectprime_server_files_legacy: "{{ files_to_validate | selectattr('path', 'search', '/selectprime/(?!v[^/]+).*?/conf/server.xml') | list }}"
+
+    - name: Verify SelectPrime HTTP port configuration (hierarchical)
+      block:
+        - name: Extract customer ID for SelectPrime files (hierarchical)
+          set_fact:
+            file_customer: "{{ item.path | regex_search('/selectprime/v[^/]+/([^/]+)/', '\\1') | upper }}"
+            file_version: "{{ item.path | regex_search('/selectprime/v([^/]+)/', '\\1') }}"
+          loop: "{{ selectprime_server_files_hierarchical }}"
+          register: selectprime_hierarchical_customers
+          
+        - name: Verify SelectPrime HTTP port for each file (hierarchical)
+          shell: "grep -q 'port=\"{{ lookup('vars', item.ansible_facts.file_customer[0] | lower + '_selectprime_http_port', default='11600') }}\"' {{ item.item.path }}"
+          loop: "{{ selectprime_hierarchical_customers.results }}"
+          register: selectprime_port_check_hierarchical
+          failed_when: false
+          
+        - name: Record SelectPrime port validation errors (hierarchical)
+          set_fact:
+            validation_errors: "{{ validation_errors + [{'file': item.item.item.path, 'error': 'SelectPrime HTTP port configuration not found or incorrect'}] }}"
+          loop: "{{ selectprime_port_check_hierarchical.results }}"
+          when: item.rc is defined and item.rc != 0
+      when: "'selectprime' in products or products == 'all' and selectprime_server_files_hierarchical is defined and selectprime_server_files_hierarchical | length > 0"
+
+    - name: Verify SelectPrime HTTP port configuration (legacy)
+      block:
+        - name: Extract customer ID for SelectPrime files (legacy)
+          set_fact:
+            file_customer: "{{ item.path | regex_search('/selectprime/([^/]+)/', '\\1') | upper }}"
+          loop: "{{ selectprime_server_files_legacy }}"
+          register: selectprime_legacy_customers
+          
+        - name: Verify SelectPrime HTTP port for each file (legacy)
+          shell: "grep -q 'port=\"{{ lookup('vars', item.ansible_facts.file_customer[0] | lower + '_selectprime_http_port', default='11600') }}\"' {{ item.item.path }}"
+          loop: "{{ selectprime_legacy_customers.results }}"
+          register: selectprime_port_check_legacy
+          failed_when: false
+          
+        - name: Record SelectPrime port validation errors (legacy)
+          set_fact:
+            validation_errors: "{{ validation_errors + [{'file': item.item.item.path, 'error': 'SelectPrime HTTP port configuration not found or incorrect'}] }}"
+          loop: "{{ selectprime_port_check_legacy.results }}"
+          when: item.rc is defined and item.rc != 0
+      when: "'selectprime' in products or products == 'all' and selectprime_server_files_legacy is defined and selectprime_server_files_legacy | length > 0"
+      
+    # Process API files - hierarchical structure
+    - name: Extract API server.xml paths (hierarchical)
+      set_fact:
+        api_server_files_hierarchical: "{{ files_to_validate | selectattr('path', 'search', '/api/v[^/]+/.*?/conf/server.xml') | list }}"
+
+    # Process API files - legacy structure
+    - name: Extract API server.xml paths (legacy)
+      set_fact:
+        api_server_files_legacy: "{{ files_to_validate | selectattr('path', 'search', '/api/(?!v[^/]+).*?/conf/server.xml') | list }}"
+
+    - name: Verify API HTTP port configuration (hierarchical)
+      block:
+        - name: Extract customer ID for API files (hierarchical)
+          set_fact:
+            file_customer: "{{ item.path | regex_search('/api/v[^/]+/([^/]+)/', '\\1') | upper }}"
+            file_version: "{{ item.path | regex_search('/api/v([^/]+)/', '\\1') }}"
+          loop: "{{ api_server_files_hierarchical }}"
+          register: api_hierarchical_customers
+          
+        - name: Extract environment for API files (hierarchical)
+          set_fact:
+            file_env: "{{ item.path | regex_search('/api/v[^/]+/.+?/(TEST|PROD)/', '\\1') | default('PROD') }}"
+          loop: "{{ api_server_files_hierarchical }}"
+          register: api_hierarchical_environments
+          
+        - name: Display API environment details for debugging (hierarchical)
+          debug:
+            msg: "API file path: {{ item.item.path }}, environment: {{ item.ansible_facts.file_env }}"
+          loop: "{{ api_hierarchical_environments.results }}"
+          when: verbose_mode
+          
+        - name: Verify API HTTP port for each file (hierarchical)
+          shell: >
+            {% if item.0.ansible_facts.file_env[0] == 'TEST' %}
+            grep -q 'port=\"{{ lookup('vars', item.1.ansible_facts.file_customer[0] | lower + '_api_test_http_port', default='12220') }}\"' {{ item.1.item.path }}
+            {% else %}
+            grep -q 'port=\"{{ lookup('vars', item.1.ansible_facts.file_customer[0] | lower + '_api_http_port', default='12200') }}\"' {{ item.1.item.path }}
+            {% endif %}
+          loop: "{{ api_hierarchical_environments.results | zip(api_hierarchical_customers.results) | list }}"
+          register: api_port_check_hierarchical
+          failed_when: false
+          
+        - name: Record API port validation errors (hierarchical)
+          set_fact:
+            validation_errors: "{{ validation_errors + [{'file': item.item.1.item.path, 'error': 'API HTTP port configuration not found or incorrect'}] }}"
+          loop: "{{ api_port_check_hierarchical.results }}"
+          when: item.rc is defined and item.rc != 0
+      when: "'api' in products or products == 'all' and api_server_files_hierarchical is defined and api_server_files_hierarchical | length > 0"
+
+    - name: Verify API HTTP port configuration (legacy)
+      block:
+        - name: Extract customer ID for API files (legacy)
+          set_fact:
+            file_customer: "{{ item.path | regex_search('/api/([^/]+)/', '\\1') | upper }}"
+          loop: "{{ api_server_files_legacy }}"
+          register: api_legacy_customers
+          
+        - name: Extract environment for API files (legacy)
+          set_fact:
+            file_env: "{{ item.path | regex_search('/api/.+?/(TEST|PROD)/', '\\1') | default('PROD') }}"
+          loop: "{{ api_server_files_legacy }}"
+          register: api_legacy_environments
+          
+        - name: Verify API HTTP port for each file (with environment check) (legacy)
+          shell: >
+            {% if item.0.ansible_facts.file_env[0] == 'TEST' %}
+            grep -q 'port=\"{{ lookup('vars', item.1.ansible_facts.file_customer[0] | lower + '_api_test_http_port', default='12220') }}\"' {{ item.1.item.path }}
+            {% else %}
+            grep -q 'port=\"{{ lookup('vars', item.1.ansible_facts.file_customer[0] | lower + '_api_http_port', default='12200') }}\"' {{ item.1.item.path }}
+            {% endif %}
+          loop: "{{ api_legacy_environments.results | zip(api_legacy_customers.results) | list }}"
+          register: api_port_check_legacy
+          failed_when: false
+          
+        - name: Record API port validation errors (legacy)
+          set_fact:
+            validation_errors: "{{ validation_errors + [{'file': item.item.1.item.path, 'error': 'API HTTP port configuration not found or incorrect'}] }}"
+          loop: "{{ api_port_check_legacy.results }}"
+          when: item.rc is defined and item.rc != 0
+      when: "'api' in products or products == 'all' and api_server_files_legacy is defined and api_server_files_legacy | length > 0"
+
+    # Process Trax files - hierarchical structure
+    - name: Extract Trax server.xml paths (hierarchical)
+      set_fact:
+        trax_server_files_hierarchical: "{{ files_to_validate | selectattr('path', 'search', '/trax/v[^/]+/.*?/conf/server.xml') | list }}"
+
+    # Process Trax files - legacy structure
+    - name: Extract Trax server.xml paths (legacy)
+      set_fact:
+        trax_server_files_legacy: "{{ files_to_validate | selectattr('path', 'search', '/trax/(?!v[^/]+).*?/conf/server.xml') | list }}"
+
+    - name: Verify Trax HTTP port configuration (hierarchical)
+      block:
+        - name: Extract customer ID for Trax files (hierarchical)
+          set_fact:
+            file_customer: "{{ item.path | regex_search('/trax/v[^/]+/([^/]+)/', '\\1') | upper }}"
+            file_version: "{{ item.path | regex_search('/trax/v([^/]+)/', '\\1') }}"
+          loop: "{{ trax_server_files_hierarchical }}"
+          register: trax_hierarchical_customers
+          
+        - name: Verify Trax HTTP port for each file (hierarchical)
+          shell: "grep -q 'port=\"{{ lookup('vars', item.ansible_facts.file_customer[0] | lower + '_trax_http_port', default='13100') }}\"' {{ item.item.path }}"
+          loop: "{{ trax_hierarchical_customers.results }}"
+          register: trax_port_check_hierarchical
+          failed_when: false
+          
+        - name: Record Trax port validation errors (hierarchical)
+          set_fact:
+            validation_errors: "{{ validation_errors + [{'file': item.item.item.path, 'error': 'Trax HTTP port configuration not found or incorrect'}] }}"
+          loop: "{{ trax_port_check_hierarchical.results }}"
+          when: item.rc is defined and item.rc != 0
+      when: "'trax' in products or products == 'all' and trax_server_files_hierarchical is defined and trax_server_files_hierarchical | length > 0"
+
+    - name: Verify Trax HTTP port configuration (legacy)
+      block:
+        - name: Extract customer ID for Trax files (legacy)
+          set_fact:
+            file_customer: "{{ item.path | regex_search('/trax/([^/]+)/', '\\1') | upper }}"
+          loop: "{{ trax_server_files_legacy }}"
+          register: trax_legacy_customers
+          
+        - name: Verify Trax HTTP port for each file (legacy)
+          shell: "grep -q 'port=\"{{ lookup('vars', item.ansible_facts.file_customer[0] | lower + '_trax_http_port', default='13100') }}\"' {{ item.item.path }}"
+          loop: "{{ trax_legacy_customers.results }}"
+          register: trax_port_check_legacy
+          failed_when: false
+          
+        - name: Record Trax port validation errors (legacy)
+          set_fact:
+            validation_errors: "{{ validation_errors + [{'file': item.item.item.path, 'error': 'Trax HTTP port configuration not found or incorrect'}] }}"
+          loop: "{{ trax_port_check_legacy.results }}"
+          when: item.rc is defined and item.rc != 0
+      when: "'trax' in products or products == 'all' and trax_server_files_legacy is defined and trax_server_files_legacy | length > 0"
+
+    - name: Validate against XML schemas
+      command: "xmllint --noout {{ item.path }}"
+      loop: "{{ files_to_validate }}"
+      register: schema_validation
+      failed_when: false
+      
+    - name: Record schema validation errors
+      set_fact:
+        validation_errors: "{{ validation_errors + [{'file': item.item.path, 'error': item.stderr}] }}"
+      loop: "{{ schema_validation.results }}"
+      when: item.rc is defined and item.rc != 0
+      
+    - name: Create port list
+      set_fact:
+        ports: |
+          {% set port_list = [] %}
+          {% if 'dakota' in products or products == 'all' %}
+          {% set _ = port_list.append({'product': 'dakota', 'port': lookup('vars', cust + '_dakota_http_port', default='11300') | int, 'customer': cust}) %}
+          {% endif %}
+          {% if 'selectprime' in products or products == 'all' %}
+          {% set _ = port_list.append({'product': 'selectprime', 'port': lookup('vars', cust + '_selectprime_http_port', default='11600') | int, 'customer': cust}) %}
+          {% endif %}
+          {% if 'api' in products or products == 'all' %}
+          {% set _ = port_list.append({'product': 'api', 'port': lookup('vars', cust + '_api_http_port', default='12200') | int, 'customer': cust}) %}
+          {% endif %}
+          {% if 'trax' in products or products == 'all' %}
+          {% set _ = port_list.append({'product': 'trax', 'port': lookup('vars', cust + '_trax_http_port', default='13100') | int, 'customer': cust}) %}
+          {% endif %}
+          {{ port_list }}

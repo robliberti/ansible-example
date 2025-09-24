@@ -1,0 +1,118 @@
+---
+# Tasks for generating API configuration files
+# This is not a standalone playbook but is included from the main playbook
+
+- name: Load customer variables
+  include_vars:
+    file: "{{ playbook_dir }}/../group_vars/{{ current_customer }}.yml"
+    
+- name: Display API generation info
+  debug:
+    msg:
+      - "API Config Generation for {{ client_id }}"
+      - "====================================="
+      - "Client ID: {{ client_id }}"
+      - "Production Tomcat directory: {{ api_tomcat_dirname }}"
+      - "Test Tomcat directory: {{ api_tomcat_dirname }}_TEST"
+      - "Version: {{ current_version }}"
+    verbosity: 1
+
+- name: Ensure output directories exist for API Production with version
+  file:
+    path: "{{ project_root }}/output/api/v{{ current_version }}/{{ client_id }}/{{ directory_path }}"
+    state: directory
+  loop:
+    - "{{ api_tomcat_dirname }}/PROD/conf"
+  loop_control:
+    loop_var: directory_path
+    
+- name: Ensure output directories exist for API Test with version
+  file:
+    path: "{{ project_root }}/output/api/v{{ current_version }}/{{ client_id }}/{{ directory_path }}"
+    state: directory
+  loop:
+    - "{{ api_tomcat_dirname }}/TEST/conf"
+  loop_control:
+    loop_var: directory_path
+    
+- name: Generate server.xml for API Production
+  template:
+    src: "{{ project_root }}/ansible/templates/api/server-prod.xml.j2"
+    dest: "{{ project_root }}/output/api/v{{ current_version }}/{{ client_id }}/{{ api_tomcat_dirname }}/PROD/conf/server.xml"
+  register: server_prod_xml_result
+    
+- name: Generate server.xml for API Test
+  template:
+    src: "{{ project_root }}/ansible/templates/api/server-test.xml.j2"
+    dest: "{{ project_root }}/output/api/v{{ current_version }}/{{ client_id }}/{{ api_tomcat_dirname }}/TEST/conf/server.xml"
+  register: server_test_xml_result
+
+# Create API directory structure for additional resources
+- name: Create API directory structure for additional resources
+  file:
+    path: "{{ project_root }}/output/api/v{{ current_version }}/{{ client_id }}/{{ directory_path }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ api_tomcat_dirname }}/logs"
+    - "{{ api_tomcat_dirname }}/temp"
+    - "{{ api_tomcat_dirname }}/work"
+    - "{{ api_tomcat_dirname }}/webapps"
+    - "{{ api_tomcat_dirname }}/PROD/logs"
+    - "{{ api_tomcat_dirname }}/PROD/temp"
+    - "{{ api_tomcat_dirname }}/PROD/work"
+    - "{{ api_tomcat_dirname }}/PROD/webapps"
+    - "{{ api_tomcat_dirname }}/TEST/logs"
+    - "{{ api_tomcat_dirname }}/TEST/temp"
+    - "{{ api_tomcat_dirname }}/TEST/work"
+    - "{{ api_tomcat_dirname }}/TEST/webapps"
+  loop_control:
+    loop_var: directory_path
+
+- name: Set permissions for Tomcat directories
+  file:
+    path: "{{ project_root }}/output/api/v{{ current_version }}/{{ client_id }}/{{ api_tomcat_dirname }}"
+    state: directory
+    mode: '0755'
+    recurse: yes
+
+- name: Create version info file for API Production
+  copy:
+    content: |
+      # API Configuration Version Information (Production)
+      product=API
+      environment=PROD
+      version={{ current_version }}
+      customer={{ client_id }}
+      generated_date={{ ansible_date_time.iso8601 }}
+      generated_by=bfc-java-config-automation
+      tomcat_directory={{ api_tomcat_dirname }}
+      http_port={{ api_http_port }}
+      shutdown_port={{ api_shutdown_port }}
+    dest: "{{ project_root }}/output/api/v{{ current_version }}/{{ client_id }}/{{ api_tomcat_dirname }}/PROD/conf/version.properties"
+
+- name: Create version info file for API Test
+  copy:
+    content: |
+      # API Configuration Version Information (Test)
+      product=API
+      environment=TEST
+      version={{ current_version }}
+      customer={{ client_id }}
+      generated_date={{ ansible_date_time.iso8601 }}
+      generated_by=bfc-java-config-automation
+      tomcat_directory={{ api_tomcat_dirname }}
+      http_port={{ api_test_http_port }}
+      shutdown_port={{ api_test_shutdown_port }}
+    dest: "{{ project_root }}/output/api/v{{ current_version }}/{{ client_id }}/{{ api_tomcat_dirname }}/TEST/conf/version.properties"
+
+- name: Report generation status
+  debug:
+    msg:
+      - "API Configuration Generation Report"
+      - "====================================="
+      - "API Version: {{ current_version }}"
+      - "Production server.xml: {{ 'Generated successfully' if server_prod_xml_result.changed else 'No change' }}"
+      - "Test server.xml: {{ 'Generated successfully' if server_test_xml_result.changed else 'No change' }}"
+      - "Generated files are in: {{ project_root }}/output/api/v{{ current_version }}/{{ client_id }}/"
+    verbosity: 1

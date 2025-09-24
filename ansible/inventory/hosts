@@ -1,0 +1,12 @@
+# Inventory file for BFC Java Config Automation
+# This is a minimal hosts file since we're not connecting to remote servers
+
+[local]
+localhost ansible_connection=local
+
+[customers]
+# This is a placeholder group to help with inventory organization
+# Actual customer variables are in the group_vars directory
+gsf
+fdr
+tpc
