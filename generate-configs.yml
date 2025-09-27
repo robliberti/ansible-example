@@ -1,0 +1,1171 @@
+.github/workflows/generate-configs.yml
+
+name: Generate and Validate Tomcat Configurations
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'ansible/**'
+      - 'scripts/generate.sh'
+      - 'scripts/validate.sh'
+  pull_request:
+    paths:
+      - 'ansible/**'
+      - 'scripts/generate.sh'
+      - 'scripts/validate.sh'
+  workflow_dispatch:
+    inputs:
+      customer:
+        description: 'Customer (all, gsf, fdr, tpc)'
+        required: true
+        default: 'gsf'
+        type: string
+      products:
+        description: 'Products (all, dakota, selectprime, api, trax)'
+        required: true
+        default: 'dakota'
+        type: string
+      versions:
+        description: 'Versions (dakota=7.9,selectprime=1.0,api=1.0,trax=1.0)'
+        required: false
+        default: 'dakota=7.9,selectprime=1.0,api=1.0,trax=1.0'
+        type: string
+      environment:
+        description: 'Environment (prod, test, dev)'
+        required: true
+        default: 'prod'
+        type: string
+      deploy_to_s3:
+        description: 'Deploy to S3'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  determine-configs-to-generate:
+    runs-on: ubuntu-latest
+    outputs:
+      customer: ${{ steps.set-defaults.outputs.customer }}
+      products: ${{ steps.set-defaults.outputs.products }}
+      environment: ${{ steps.set-defaults.outputs.environment }}
+      deploy_to_s3: ${{ steps.set-defaults.outputs.deploy_to_s3 }}
+      dakota_version: ${{ steps.set-defaults.outputs.dakota_version }}
+      selectprime_version: ${{ steps.set-defaults.outputs.selectprime_version }}
+      api_version: ${{ steps.set-defaults.outputs.api_version }}
+      trax_version: ${{ steps.set-defaults.outputs.trax_version }}
+      versions: ${{ steps.set-defaults.outputs.versions }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Determine configs to generate based on changes
+        id: set-customer
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "customer=${{ github.event.inputs.customer }}" >> $GITHUB_OUTPUT
+            echo "products=${{ github.event.inputs.products }}" >> $GITHUB_OUTPUT
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+            echo "deploy_to_s3=${{ github.event.inputs.deploy_to_s3 }}" >> $GITHUB_OUTPUT
+            echo "versions_input=${{ github.event.inputs.versions }}" >> $GITHUB_OUTPUT
+          else
+            CHANGED_FILES=$(git diff --name-only ${{ github.event.pull_request.base.sha || 'HEAD^' }} ${{ github.event.pull_request.head.sha || 'HEAD' }})
+            echo "Changed files: $CHANGED_FILES"
+            
+            # Check for changes in ansible/group_vars
+            if echo "$CHANGED_FILES" | grep -q "ansible/group_vars/"; then
+              # Extract customer names from changed files
+              CUSTOMERS=$(echo "$CHANGED_FILES" | grep "ansible/group_vars/" | sed -E 's|ansible/group_vars/([^.]+)\.yml|\1|g' | tr '\n' ',' | sed 's/,$//')
+              
+              if [ -n "$CUSTOMERS" ]; then
+                echo "customer=$CUSTOMERS" >> $GITHUB_OUTPUT
+              else
+                echo "customer=all" >> $GITHUB_OUTPUT
+              fi
+            # If templates or playbooks changed, process all customers
+            elif echo "$CHANGED_FILES" | grep -q "ansible/templates/\|ansible/playbooks/"; then
+              echo "customer=all" >> $GITHUB_OUTPUT
+            else
+              echo "customer=all" >> $GITHUB_OUTPUT
+            fi
+            
+            # Check if specific product templates changed
+            PRODUCTS=""
+            if echo "$CHANGED_FILES" | grep -q "ansible/templates/dakota/\|ansible/playbooks/generate-dakota-configs.yml"; then
+              PRODUCTS="dakota,"
+            fi
+            if echo "$CHANGED_FILES" | grep -q "ansible/templates/selectprime/\|ansible/playbooks/generate-selectprime-configs.yml"; then
+              PRODUCTS="${PRODUCTS}selectprime,"
+            fi
+            if echo "$CHANGED_FILES" | grep -q "ansible/templates/api/\|ansible/playbooks/generate-api-configs.yml"; then
+              PRODUCTS="${PRODUCTS}api,"
+            fi
+            if echo "$CHANGED_FILES" | grep -q "ansible/templates/trax/\|ansible/playbooks/generate-trax-configs.yml"; then
+              PRODUCTS="${PRODUCTS}trax,"
+            fi
+            
+            # If specific products changed, use them, otherwise all
+            if [ -n "$PRODUCTS" ]; then
+              PRODUCTS=$(echo "$PRODUCTS" | sed 's/,$//')
+              echo "products=$PRODUCTS" >> $GITHUB_OUTPUT
+            else
+              echo "products=all" >> $GITHUB_OUTPUT
+            fi
+            
+            # Default values for automated runs
+            echo "environment=prod" >> $GITHUB_OUTPUT
+            echo "deploy_to_s3=false" >> $GITHUB_OUTPUT
+            echo "versions_input=dakota=7.9,selectprime=1.0,api=1.0,trax=1.0" >> $GITHUB_OUTPUT
+          fi
+      
+      # Ensure outputs are always set with default values if missing
+      - name: Set default values for outputs
+        id: set-defaults
+        run: |
+          # Set default customer if not set
+          if [ -z "${{ steps.set-customer.outputs.customer }}" ]; then
+            echo "customer=all" >> $GITHUB_OUTPUT
+          else
+            echo "customer=${{ steps.set-customer.outputs.customer }}" >> $GITHUB_OUTPUT
+          fi
+          
+          # Set default products if not set
+          if [ -z "${{ steps.set-customer.outputs.products }}" ]; then
+            echo "products=all" >> $GITHUB_OUTPUT
+          else
+            echo "products=${{ steps.set-customer.outputs.products }}" >> $GITHUB_OUTPUT
+          fi
+          
+          # Set default environment if not set
+          if [ -z "${{ steps.set-customer.outputs.environment }}" ]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+          else
+            echo "environment=${{ steps.set-customer.outputs.environment }}" >> $GITHUB_OUTPUT
+          fi
+          
+          # Set default deploy_to_s3 if not set
+          if [ -z "${{ steps.set-customer.outputs.deploy_to_s3 }}" ]; then
+            echo "deploy_to_s3=false" >> $GITHUB_OUTPUT
+          else
+            echo "deploy_to_s3=${{ steps.set-customer.outputs.deploy_to_s3 }}" >> $GITHUB_OUTPUT
+          fi
+          
+          # Parse versions string
+          VERSIONS="${{ steps.set-customer.outputs.versions_input || 'dakota=7.9,selectprime=1.0,api=1.0,trax=1.0' }}"
+          
+          # Set defaults first
+          echo "dakota_version=7.9" >> $GITHUB_OUTPUT
+          echo "selectprime_version=1.0" >> $GITHUB_OUTPUT  
+          echo "api_version=1.0" >> $GITHUB_OUTPUT
+          echo "trax_version=1.0" >> $GITHUB_OUTPUT
+          
+          # Parse actual versions if provided
+          IFS=',' read -ra VERSION_PAIRS <<< "$VERSIONS"
+          for pair in "${VERSION_PAIRS[@]}"; do
+            if [[ "$pair" =~ ^dakota=(.+)$ ]]; then
+              echo "dakota_version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            elif [[ "$pair" =~ ^selectprime=(.+)$ ]]; then
+              echo "selectprime_version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            elif [[ "$pair" =~ ^api=(.+)$ ]]; then
+              echo "api_version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            elif [[ "$pair" =~ ^trax=(.+)$ ]]; then
+              echo "trax_version=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            fi
+          done
+          
+          echo "versions=$VERSIONS" >> $GITHUB_OUTPUT
+
+      - name: Show configs to generate
+        run: |
+          echo "Will generate configs for customer: ${{ steps.set-defaults.outputs.customer }}"
+          echo "Will generate configs for products: ${{ steps.set-defaults.outputs.products }}"
+          echo "Environment: ${{ steps.set-defaults.outputs.environment }}"
+          echo "Deploy to S3: ${{ steps.set-defaults.outputs.deploy_to_s3 }}"
+          echo "Product versions:"
+          echo "  - Dakota: ${{ steps.set-defaults.outputs.dakota_version }}"
+          echo "  - SelectPrime: ${{ steps.set-defaults.outputs.selectprime_version }}"
+          echo "  - API: ${{ steps.set-defaults.outputs.api_version }}"
+          echo "  - Trax: ${{ steps.set-defaults.outputs.trax_version }}"
+          echo "Combined versions: ${{ steps.set-defaults.outputs.versions }}"
+
+  generate-and-validate:
+    needs: determine-configs-to-generate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible jinja2 pyyaml lxml
+          sudo apt-get update
+          sudo apt-get install -y libxml2-utils
+
+      # Download base Tomcat packages for each product version
+      - name: Download base Tomcat packages
+        run: |
+          mkdir -p base_tomcat_packages
+          
+          # Function to download base package for a product
+          download_base_package() {
+            local product=$1
+            local version=$2
+            local env=$3
+            
+            echo "Downloading base Tomcat package for $product v$version ($env)"
+            # Create directory structure
+            mkdir -p "base_tomcat_packages/$product/v$version"
+            
+            # Download the base package with the hierarchical structure
+            aws s3 cp "s3://tomcat-base-packages/$env/$product/v$version/tomcat-base-$product.zip" "base_tomcat_packages/$product/v$version/" || echo "No base package found for $product v$version"
+          }
+          
+          # Download base packages based on product versions
+          ENVIRONMENT="${{ needs.determine-configs-to-generate.outputs.environment || 'prod' }}"
+          PRODUCTS=$(echo "${{ needs.determine-configs-to-generate.outputs.products }}" | tr ',' ' ')
+          
+          for product in $PRODUCTS; do
+            if [ "$product" = "all" ] || [ "$product" = "dakota" ]; then
+              download_base_package "dakota" "${{ needs.determine-configs-to-generate.outputs.dakota_version }}" "$ENVIRONMENT"
+            fi
+            
+            if [ "$product" = "all" ] || [ "$product" = "selectprime" ]; then
+              download_base_package "selectprime" "${{ needs.determine-configs-to-generate.outputs.selectprime_version }}" "$ENVIRONMENT"
+            fi
+            
+            if [ "$product" = "all" ] || [ "$product" = "api" ]; then
+              download_base_package "api" "${{ needs.determine-configs-to-generate.outputs.api_version }}" "$ENVIRONMENT"
+            fi
+            
+            if [ "$product" = "all" ] || [ "$product" = "trax" ]; then
+              download_base_package "trax" "${{ needs.determine-configs-to-generate.outputs.trax_version }}" "$ENVIRONMENT"
+            fi
+          done
+          
+          echo "Downloaded base packages:"
+          find base_tomcat_packages -type f | sort
+
+      - name: Debug outputs
+        run: |
+          echo "Customer: '${{ needs.determine-configs-to-generate.outputs.customer }}'"
+          echo "Products: '${{ needs.determine-configs-to-generate.outputs.products }}'"
+          echo "Environment: '${{ needs.determine-configs-to-generate.outputs.environment }}'"
+          echo "Deploy to S3: '${{ needs.determine-configs-to-generate.outputs.deploy_to_s3 }}'"
+          echo "Dakota version: '${{ needs.determine-configs-to-generate.outputs.dakota_version }}'"
+          echo "SelectPrime version: '${{ needs.determine-configs-to-generate.outputs.selectprime_version }}'"
+          echo "API version: '${{ needs.determine-configs-to-generate.outputs.api_version }}'"
+          echo "Trax version: '${{ needs.determine-configs-to-generate.outputs.trax_version }}'"
+          echo "Combined versions: '${{ needs.determine-configs-to-generate.outputs.versions }}'"
+
+      - name: Create output directory
+        run: |
+          mkdir -p output
+          chmod 777 output
+          echo "Created output directory:"
+          ls -la
+
+      - name: Generate configs
+        run: |
+          # Clean up the products string completely - remove all spaces around commas
+          PRODUCTS_CLEAN=$(echo "${{ needs.determine-configs-to-generate.outputs.products }}" | tr -d ' ')
+          
+          echo "Original products: '${{ needs.determine-configs-to-generate.outputs.products }}'"
+          echo "Cleaned products: '$PRODUCTS_CLEAN'"
+          
+          # Parse customer input - handle both single customers and "all"
+          CUSTOMER_INPUT="${{ needs.determine-configs-to-generate.outputs.customer }}"
+          if [ "$CUSTOMER_INPUT" = "all" ]; then
+            # Dynamically get all customers from group_vars directory
+            CUSTOMERS=""
+            for customer_file in ansible/group_vars/*.yml; do
+              if [ -f "$customer_file" ]; then
+                customer_name=$(basename "$customer_file" .yml)
+                CUSTOMERS="$CUSTOMERS $customer_name"
+              fi
+            done
+            # Trim leading/trailing spaces
+            CUSTOMERS=$(echo "$CUSTOMERS" | xargs)
+          else
+            # Convert comma-separated string to space-separated for individual processing
+            CUSTOMERS=$(echo "$CUSTOMER_INPUT" | sed 's/,/ /g')
+          fi
+          
+          echo "Processing customers: $CUSTOMERS"
+          echo "Available customer files: $(ls -1 ansible/group_vars/*.yml | xargs basename -s .yml)"
+          
+          # Process each customer individually
+          for customer in $CUSTOMERS; do
+            echo "Generating configs for customer: $customer"
+            ansible-playbook ansible/playbooks/generate-configs.yml \
+              -e "customer=$customer" \
+              -e "products=$PRODUCTS_CLEAN" \
+              -e "versions=${{ needs.determine-configs-to-generate.outputs.versions }}"
+          done
+
+      - name: Debug generated files
+        run: |
+          echo "Project structure:"
+          ls -la
+          
+          echo "Output directory:"
+          ls -la output || echo "Output directory does not exist"
+          
+          echo "Checking for customer directories in output:"
+          find output -type d -maxdepth 2 || echo "No customer directories found"
+          
+          echo "Searching for any XML files:"
+          find . -name "*.xml" | grep -v "node_modules" || echo "No XML files found"
+          
+          # Fix the environment variables check to avoid exit code 1
+          echo "Environment variables related to Ansible:"
+          env | grep -E "PROJECT_ROOT|ANSIBLE" || echo "No PROJECT_ROOT or ANSIBLE environment variables found"
+          
+          echo "Ansible version:"
+          ansible --version || echo "Ansible version command failed"
+          
+          echo "Ansible inventory:"
+          ansible-inventory --list || echo "No inventory available"
+
+      - name: Validate configs
+        run: |
+          # Parse customer input for validation
+          CUSTOMER_INPUT="${{ needs.determine-configs-to-generate.outputs.customer }}"
+          if [ "$CUSTOMER_INPUT" = "all" ]; then
+            # Dynamically get all customers from group_vars directory
+            CUSTOMERS=""
+            for customer_file in ansible/group_vars/*.yml; do
+              if [ -f "$customer_file" ]; then
+                customer_name=$(basename "$customer_file" .yml)
+                CUSTOMERS="$CUSTOMERS $customer_name"
+              fi
+            done
+            # Trim leading/trailing spaces
+            CUSTOMERS=$(echo "$CUSTOMERS" | xargs)
+          else
+            CUSTOMERS=$(echo "$CUSTOMER_INPUT" | sed 's/,/ /g')
+          fi
+          
+          PRODUCTS="${{ needs.determine-configs-to-generate.outputs.products }}"
+          VERSIONS="${{ needs.determine-configs-to-generate.outputs.versions }}"
+          
+          # Validate each customer individually
+          for customer in $CUSTOMERS; do
+            echo "Validating configs for customer: $customer"
+            ansible-playbook ansible/playbooks/validate-configs.yml \
+              -e "customer=$customer" \
+              -e "products=$PRODUCTS" \
+              -e "versions=$VERSIONS" || echo "Validation completed with warnings for customer: $customer"
+          done
+
+      - name: Prepare artifacts
+        run: |
+          # Create base temp_artifacts directory with proper permissions
+          mkdir -p temp_artifacts
+          chmod 755 temp_artifacts
+          
+          # Function to prepare artifacts for a customer and product
+          prepare_artifact() {
+            local customer=$1
+            local product=$2
+            local version=$3
+            
+            customer_upper=$(echo "$customer" | tr '[:lower:]' '[:upper:]')
+            customer_lower=$(echo "$customer" | tr '[:upper:]' '[:lower:]')
+            
+            if [ -d "output/$product/v$version/$customer_upper" ]; then
+              echo "Preparing artifact for $customer_upper $product v$version"
+              
+              # Create all necessary directory structure with explicit mkdir commands
+              mkdir -p "temp_artifacts/$product/v$version/$customer_lower/configs"
+              mkdir -p "temp_artifacts/$product/v$version"
+              
+              # Verify directories were created
+              if [ ! -d "temp_artifacts/$product/v$version/$customer_lower/configs" ]; then
+                echo "Failed to create configs directory for $customer_upper $product v$version"
+                return 1
+              fi
+              
+              if [ ! -d "temp_artifacts/$product/v$version" ]; then
+                echo "Failed to create version directory for $customer_upper $product v$version"
+                return 1
+              fi
+              
+              # Copy config files
+              cp -r "output/$product/v$version/$customer_upper"/* "temp_artifacts/$product/v$version/$customer_lower/configs/" || {
+                echo "Failed to copy config files for $customer_upper $product v$version"
+                return 1
+              }
+              
+              # Create zip file using absolute path and ensure target directory exists
+              local zip_path="temp_artifacts/$product/v$version/$customer_lower-$product-v$version-configs.zip"
+              
+              # Create the zip file using a more reliable method
+              if (cd "output/$product/v$version/$customer_upper" && zip -r "../../../../$zip_path" .); then
+                echo "Successfully created zip: $zip_path"
+                # Verify the zip file was created
+                if [ -f "$zip_path" ]; then
+                  echo "Zip file verified: $zip_path ($(du -h "$zip_path" | cut -f1))"
+                else
+                  echo "Warning: Zip file creation reported success but file not found: $zip_path"
+                fi
+              else
+                echo "Failed to create zip file for $customer_upper $product v$version"
+                # Try alternative zip creation method
+                echo "Attempting alternative zip creation method..."
+                (cd "temp_artifacts/$product/v$version/$customer_lower/configs" && zip -r "../$customer_lower-$product-v$version-configs.zip" .) || {
+                  echo "Alternative zip creation also failed for $customer_upper $product v$version"
+                }
+              fi
+            else
+              echo "Directory output/$product/v$version/$customer_upper does not exist, skipping artifact creation"
+            fi
+          }
+          
+          # List all directories in output for debugging
+          echo "Available directories for artifacts:"
+          find output -type d || echo "No directories found in output"
+          
+          # Process all customers and products as needed - DYNAMIC CUSTOMER PARSING
+          CUSTOMER_INPUT="${{ needs.determine-configs-to-generate.outputs.customer }}"
+          if [ "$CUSTOMER_INPUT" = "all" ]; then
+            # Dynamically get all customers from group_vars directory
+            CUSTOMERS=""
+            for customer_file in ansible/group_vars/*.yml; do
+              if [ -f "$customer_file" ]; then
+                customer_name=$(basename "$customer_file" .yml)
+                CUSTOMERS="$CUSTOMERS $customer_name"
+              fi
+            done
+            # Trim leading/trailing spaces
+            CUSTOMERS=$(echo "$CUSTOMERS" | xargs)
+          else
+            CUSTOMERS=$(echo "$CUSTOMER_INPUT" | sed 's/,/ /g')
+          fi
+          
+          PRODUCTS=$(echo "${{ needs.determine-configs-to-generate.outputs.products }}" | tr ',' ' ' | tr -s ' ')
+          
+          # Get product versions
+          DAKOTA_VERSION="${{ needs.determine-configs-to-generate.outputs.dakota_version }}"
+          SELECTPRIME_VERSION="${{ needs.determine-configs-to-generate.outputs.selectprime_version }}"
+          API_VERSION="${{ needs.determine-configs-to-generate.outputs.api_version }}"
+          TRAX_VERSION="${{ needs.determine-configs-to-generate.outputs.trax_version }}"
+          
+          for customer in $CUSTOMERS; do
+            for product in $PRODUCTS; do
+              if [ "$product" = "all" ]; then
+                # Process all products
+                prepare_artifact "$customer" "dakota" "$DAKOTA_VERSION"
+                prepare_artifact "$customer" "selectprime" "$SELECTPRIME_VERSION"
+                prepare_artifact "$customer" "api" "$API_VERSION"
+                prepare_artifact "$customer" "trax" "$TRAX_VERSION"
+              elif [ "$product" = "dakota" ]; then
+                prepare_artifact "$customer" "$product" "$DAKOTA_VERSION"
+              elif [ "$product" = "selectprime" ]; then
+                prepare_artifact "$customer" "$product" "$SELECTPRIME_VERSION"
+              elif [ "$product" = "api" ]; then
+                prepare_artifact "$customer" "$product" "$API_VERSION"
+              elif [ "$product" = "trax" ]; then
+                prepare_artifact "$customer" "$product" "$TRAX_VERSION"
+              fi
+            done
+          done
+          
+          # Debug artifact output
+          echo "Contents of temp_artifacts directory:"
+          find temp_artifacts -type f || echo "No files found in temp_artifacts"
+          
+          echo "ZIP files created:"
+          find temp_artifacts -name "*.zip" -exec ls -lh {} \; || echo "No ZIP files found"
+
+      # Create a summary of what artifacts were generated and upload only those
+      - name: Prepare artifact summary and upload
+        run: |
+          echo "## Generated Artifacts Summary" >> $GITHUB_STEP_SUMMARY
+          
+          # Initialize counters
+          total_artifacts=0
+          
+          # Function to attempt artifact upload if directory exists
+          upload_if_exists() {
+            local customer=$1
+            local product=$2  
+            local version=$3
+            local customer_lower=$(echo "$customer" | tr '[:upper:]' '[:lower:]')
+            local artifact_path="temp_artifacts/$product/v$version/$customer_lower"
+            
+            if [ -d "$artifact_path" ] && [ "$(ls -A "$artifact_path" 2>/dev/null)" ]; then
+              echo "✅ Found: $customer-$product-v$version-configs" >> $GITHUB_STEP_SUMMARY
+              echo "   Path: $artifact_path" >> $GITHUB_STEP_SUMMARY
+              echo "   Files: $(find "$artifact_path" -type f | wc -l)" >> $GITHUB_STEP_SUMMARY
+              
+              # Create upload marker for the next step
+              echo "$customer_lower|$product|v$version|$artifact_path" >> /tmp/artifacts_to_upload.txt
+              
+              total_artifacts=$((total_artifacts + 1))
+              return 0
+            else
+              echo "❌ Not found: $customer-$product-v$version-configs (Path: $artifact_path)" >> $GITHUB_STEP_SUMMARY
+              return 0  # Changed from return 1 to return 0 to avoid script failure
+            fi
+          }
+          
+          # Check all possible combinations based on what was requested - DYNAMIC CUSTOMER PARSING
+          CUSTOMER_INPUT="${{ needs.determine-configs-to-generate.outputs.customer }}"
+          if [ "$CUSTOMER_INPUT" = "all" ]; then
+            # Dynamically get all customers from group_vars directory
+            CUSTOMERS=""
+            for customer_file in ansible/group_vars/*.yml; do
+              if [ -f "$customer_file" ]; then
+                customer_name=$(basename "$customer_file" .yml)
+                CUSTOMERS="$CUSTOMERS $customer_name"
+              fi
+            done
+            # Trim leading/trailing spaces
+            CUSTOMERS=$(echo "$CUSTOMERS" | xargs)
+          else
+            CUSTOMERS=$(echo "$CUSTOMER_INPUT" | sed 's/,/ /g')
+          fi
+          
+          PRODUCTS=$(echo "${{ needs.determine-configs-to-generate.outputs.products }}" | tr ',' ' ' | tr -s ' ')
+          
+          # If "all" was specified for products, expand to actual product list
+          if [[ "$PRODUCTS" == *"all"* ]]; then
+            PRODUCTS="dakota selectprime api trax"
+          fi
+          
+          echo "Checking for artifacts..." >> $GITHUB_STEP_SUMMARY
+          echo "Customers: $CUSTOMERS" >> $GITHUB_STEP_SUMMARY
+          echo "Products: $PRODUCTS" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check each customer/product combination
+          for customer in $CUSTOMERS; do
+            customer_upper=$(echo "$customer" | tr '[:lower:]' '[:upper:]')
+            
+            for product in $PRODUCTS; do
+              # Trim whitespace from product name
+              product=$(echo "$product" | xargs)
+              case $product in
+                "dakota")
+                  upload_if_exists "$customer_upper" "$product" "${{ needs.determine-configs-to-generate.outputs.dakota_version }}" || true
+                  ;;
+                "selectprime")
+                  upload_if_exists "$customer_upper" "$product" "${{ needs.determine-configs-to-generate.outputs.selectprime_version }}" || true
+                  ;;
+                "api")
+                  upload_if_exists "$customer_upper" "$product" "${{ needs.determine-configs-to-generate.outputs.api_version }}" || true
+                  ;;
+                "trax")
+                  upload_if_exists "$customer_upper" "$product" "${{ needs.determine-configs-to-generate.outputs.trax_version }}" || true
+                  ;;
+                *)
+                  echo "❓ Unknown product: '$product'" >> $GITHUB_STEP_SUMMARY
+                  ;;
+              esac
+            done
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Total artifacts found: $total_artifacts**" >> $GITHUB_STEP_SUMMARY
+          
+          if [ $total_artifacts -eq 0 ]; then
+            echo "❌ No artifacts were generated" >> $GITHUB_STEP_SUMMARY
+            echo "Check the generation step for errors" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Debug Information:**" >> $GITHUB_STEP_SUMMARY
+            echo "Expected artifact structure: temp_artifacts/\{product\}/v\{version\}/\{customer_lower\}/" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Actual temp_artifacts contents:**" >> $GITHUB_STEP_SUMMARY
+            if [ -d "temp_artifacts" ]; then
+              find temp_artifacts -type d | head -20 >> $GITHUB_STEP_SUMMARY || echo "No directories found" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "temp_artifacts directory does not exist" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+          
+          # Save count for next step
+          echo "artifact_count=$total_artifacts" >> $GITHUB_OUTPUT
+
+      # Upload Dakota configs for all customers (using dynamic versions)
+      - name: Upload GSF Dakota configs
+        if: hashFiles('temp_artifacts/dakota/v${{ needs.determine-configs-to-generate.outputs.dakota_version }}/gsf/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsf-dakota-v${{ needs.determine-configs-to-generate.outputs.dakota_version }}-configs
+          path: temp_artifacts/dakota/v${{ needs.determine-configs-to-generate.outputs.dakota_version }}/gsf/
+
+      - name: Upload FDR Dakota configs
+        if: hashFiles('temp_artifacts/dakota/v${{ needs.determine-configs-to-generate.outputs.dakota_version }}/fdr/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdr-dakota-v${{ needs.determine-configs-to-generate.outputs.dakota_version }}-configs
+          path: temp_artifacts/dakota/v${{ needs.determine-configs-to-generate.outputs.dakota_version }}/fdr/
+
+      - name: Upload TPC Dakota configs
+        if: hashFiles('temp_artifacts/dakota/v${{ needs.determine-configs-to-generate.outputs.dakota_version }}/tpc/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpc-dakota-v${{ needs.determine-configs-to-generate.outputs.dakota_version }}-configs
+          path: temp_artifacts/dakota/v${{ needs.determine-configs-to-generate.outputs.dakota_version }}/tpc/
+
+      - name: Upload ABC Dakota configs
+        if: hashFiles('temp_artifacts/dakota/v${{ needs.determine-configs-to-generate.outputs.dakota_version }}/abc/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: abc-dakota-v${{ needs.determine-configs-to-generate.outputs.dakota_version }}-configs
+          path: temp_artifacts/dakota/v${{ needs.determine-configs-to-generate.outputs.dakota_version }}/abc/
+
+      - name: Upload XYZ Dakota configs
+        if: hashFiles('temp_artifacts/dakota/v${{ needs.determine-configs-to-generate.outputs.dakota_version }}/xyz/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: xyz-dakota-v${{ needs.determine-configs-to-generate.outputs.dakota_version }}-configs
+          path: temp_artifacts/dakota/v${{ needs.determine-configs-to-generate.outputs.dakota_version }}/xyz/
+          
+      # Upload SelectPrime configs for all customers (using dynamic versions)
+      - name: Upload GSF SelectPrime configs
+        if: hashFiles('temp_artifacts/selectprime/v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}/gsf/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsf-selectprime-v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}-configs
+          path: temp_artifacts/selectprime/v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}/gsf/
+
+      - name: Upload FDR SelectPrime configs
+        if: hashFiles('temp_artifacts/selectprime/v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}/fdr/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdr-selectprime-v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}-configs
+          path: temp_artifacts/selectprime/v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}/fdr/
+
+      - name: Upload TPC SelectPrime configs
+        if: hashFiles('temp_artifacts/selectprime/v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}/tpc/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpc-selectprime-v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}-configs
+          path: temp_artifacts/selectprime/v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}/tpc/
+
+      - name: Upload ABC SelectPrime configs
+        if: hashFiles('temp_artifacts/selectprime/v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}/abc/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: abc-selectprime-v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}-configs
+          path: temp_artifacts/selectprime/v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}/abc/
+
+      - name: Upload XYZ SelectPrime configs
+        if: hashFiles('temp_artifacts/selectprime/v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}/xyz/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: xyz-selectprime-v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}-configs
+          path: temp_artifacts/selectprime/v${{ needs.determine-configs-to-generate.outputs.selectprime_version }}/xyz/
+          
+      # Upload API configs for all customers (using dynamic versions)
+      - name: Upload GSF API configs
+        if: hashFiles('temp_artifacts/api/v${{ needs.determine-configs-to-generate.outputs.api_version }}/gsf/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsf-api-v${{ needs.determine-configs-to-generate.outputs.api_version }}-configs
+          path: temp_artifacts/api/v${{ needs.determine-configs-to-generate.outputs.api_version }}/gsf/
+
+      - name: Upload FDR API configs
+        if: hashFiles('temp_artifacts/api/v${{ needs.determine-configs-to-generate.outputs.api_version }}/fdr/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdr-api-v${{ needs.determine-configs-to-generate.outputs.api_version }}-configs
+          path: temp_artifacts/api/v${{ needs.determine-configs-to-generate.outputs.api_version }}/fdr/
+
+      - name: Upload TPC API configs
+        if: hashFiles('temp_artifacts/api/v${{ needs.determine-configs-to-generate.outputs.api_version }}/tpc/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpc-api-v${{ needs.determine-configs-to-generate.outputs.api_version }}-configs
+          path: temp_artifacts/api/v${{ needs.determine-configs-to-generate.outputs.api_version }}/tpc/
+
+      - name: Upload ABC API configs
+        if: hashFiles('temp_artifacts/api/v${{ needs.determine-configs-to-generate.outputs.api_version }}/abc/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: abc-api-v${{ needs.determine-configs-to-generate.outputs.api_version }}-configs
+          path: temp_artifacts/api/v${{ needs.determine-configs-to-generate.outputs.api_version }}/abc/
+
+      - name: Upload XYZ API configs
+        if: hashFiles('temp_artifacts/api/v${{ needs.determine-configs-to-generate.outputs.api_version }}/xyz/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: xyz-api-v${{ needs.determine-configs-to-generate.outputs.api_version }}-configs
+          path: temp_artifacts/api/v${{ needs.determine-configs-to-generate.outputs.api_version }}/xyz/
+          
+      # Upload Trax configs for all customers (using dynamic versions)  
+      - name: Upload GSF Trax configs
+        if: hashFiles('temp_artifacts/trax/v${{ needs.determine-configs-to-generate.outputs.trax_version }}/gsf/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsf-trax-v${{ needs.determine-configs-to-generate.outputs.trax_version }}-configs
+          path: temp_artifacts/trax/v${{ needs.determine-configs-to-generate.outputs.trax_version }}/gsf/
+
+      - name: Upload FDR Trax configs
+        if: hashFiles('temp_artifacts/trax/v${{ needs.determine-configs-to-generate.outputs.trax_version }}/fdr/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: fdr-trax-v${{ needs.determine-configs-to-generate.outputs.trax_version }}-configs
+          path: temp_artifacts/trax/v${{ needs.determine-configs-to-generate.outputs.trax_version }}/fdr/
+
+      - name: Upload TPC Trax configs
+        if: hashFiles('temp_artifacts/trax/v${{ needs.determine-configs-to-generate.outputs.trax_version }}/tpc/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: tpc-trax-v${{ needs.determine-configs-to-generate.outputs.trax_version }}-configs
+          path: temp_artifacts/trax/v${{ needs.determine-configs-to-generate.outputs.trax_version }}/tpc/
+
+      - name: Upload ABC Trax configs
+        if: hashFiles('temp_artifacts/trax/v${{ needs.determine-configs-to-generate.outputs.trax_version }}/abc/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: abc-trax-v${{ needs.determine-configs-to-generate.outputs.trax_version }}-configs
+          path: temp_artifacts/trax/v${{ needs.determine-configs-to-generate.outputs.trax_version }}/abc/
+
+      - name: Upload XYZ Trax configs
+        if: hashFiles('temp_artifacts/trax/v${{ needs.determine-configs-to-generate.outputs.trax_version }}/xyz/**') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: xyz-trax-v${{ needs.determine-configs-to-generate.outputs.trax_version }}-configs
+          path: temp_artifacts/trax/v${{ needs.determine-configs-to-generate.outputs.trax_version }}/xyz/
+          
+      - name: Prepare complete Tomcat packages
+        run: |
+          mkdir -p complete_packages
+          
+          # Function to prepare complete package for a customer and product
+          prepare_complete_package() {
+            local customer=$1
+            local product=$2
+            local version=$3
+            
+            customer_upper=$(echo "$customer" | tr '[:lower:]' '[:upper:]')
+            customer_lower=$(echo "$customer" | tr '[:upper:]' '[:lower:]')
+            
+            # Check if base package exists
+            if [ -f "base_tomcat_packages/$product/v$version/tomcat-base-$product.zip" ]; then
+              echo "Preparing complete package for $customer_upper $product v$version"
+              
+              # Create hierarchical directory structure
+              mkdir -p "complete_packages/$product/v$version/$customer_lower"
+              mkdir -p "temp_extract/$product/v$version/$customer_lower"
+              
+              # Extract base package
+              unzip -q "base_tomcat_packages/$product/v$version/tomcat-base-$product.zip" -d "temp_extract/$product/v$version/$customer_lower"
+              
+              # Check if config directory exists
+              if [ -d "output/$product/v$version/$customer_upper" ]; then
+                # Copy configs to the right location in the extracted package
+                cp -r "output/$product/v$version/$customer_upper"/* "temp_extract/$product/v$version/$customer_lower/tomcat/conf/"
+                
+                # Create a new zip with base + configs
+                (cd "temp_extract/$product/v$version/$customer_lower" && zip -rq "../../../../complete_packages/$product/v$version/$customer_lower/$customer_lower-$product-v$version-complete.zip" .)
+                
+                # Also copy to temp_artifacts for upload
+                mkdir -p "temp_artifacts/$product/v$version"
+                cp "complete_packages/$product/v$version/$customer_lower/$customer_lower-$product-v$version-complete.zip" "temp_artifacts/$product/v$version/"
+                
+                echo "Created complete package: complete_packages/$product/v$version/$customer_lower/$customer_lower-$product-v$version-complete.zip"
+              else
+                echo "No configs found for $customer_upper $product v$version"
+              fi
+            else
+              echo "No base package found for $product v$version, skipping complete package creation"
+            fi
+          }
+          
+          # Process all customers and products as needed - DYNAMIC CUSTOMER PARSING
+          CUSTOMER_INPUT="${{ needs.determine-configs-to-generate.outputs.customer }}"
+          if [ "$CUSTOMER_INPUT" = "all" ]; then
+            # Dynamically get all customers from group_vars directory
+            CUSTOMERS=""
+            for customer_file in ansible/group_vars/*.yml; do
+              if [ -f "$customer_file" ]; then
+                customer_name=$(basename "$customer_file" .yml)
+                CUSTOMERS="$CUSTOMERS $customer_name"
+              fi
+            done
+            # Trim leading/trailing spaces
+            CUSTOMERS=$(echo "$CUSTOMERS" | xargs)
+          else
+            CUSTOMERS=$(echo "$CUSTOMER_INPUT" | sed 's/,/ /g')
+          fi
+          
+          PRODUCTS=$(echo "${{ needs.determine-configs-to-generate.outputs.products }}" | tr ',' ' ' | tr -s ' ')
+          
+          # Get product versions
+          DAKOTA_VERSION="${{ needs.determine-configs-to-generate.outputs.dakota_version }}"
+          SELECTPRIME_VERSION="${{ needs.determine-configs-to-generate.outputs.selectprime_version }}"
+          API_VERSION="${{ needs.determine-configs-to-generate.outputs.api_version }}"
+          TRAX_VERSION="${{ needs.determine-configs-to-generate.outputs.trax_version }}"
+          
+          for customer in $CUSTOMERS; do
+            for product in $PRODUCTS; do
+              # Trim whitespace from product name
+              product=$(echo "$product" | xargs)
+              if [ "$product" = "all" ]; then
+                # Process all products
+                prepare_complete_package "$customer" "dakota" "$DAKOTA_VERSION"
+                prepare_complete_package "$customer" "selectprime" "$SELECTPRIME_VERSION"
+                prepare_complete_package "$customer" "api" "$API_VERSION"
+                prepare_complete_package "$customer" "trax" "$TRAX_VERSION"
+              elif [ "$product" = "dakota" ]; then
+                prepare_complete_package "$customer" "$product" "$DAKOTA_VERSION"
+              elif [ "$product" = "selectprime" ]; then
+                prepare_complete_package "$customer" "$product" "$SELECTPRIME_VERSION"
+              elif [ "$product" = "api" ]; then
+                prepare_complete_package "$customer" "$product" "$API_VERSION"
+              elif [ "$product" = "trax" ]; then
+                prepare_complete_package "$customer" "$product" "$TRAX_VERSION"
+              fi
+            done
+          done
+          
+          # List created packages
+          echo "Complete packages created:"
+          ls -la complete_packages/ || echo "No complete packages were created"
+          
+          # Copy complete packages to temp_artifacts for upload
+          find complete_packages -name "*.zip" -exec cp {} temp_artifacts/ \; || echo "No complete packages to copy"
+
+      - name: Upload all ZIP configs
+        if: hashFiles('temp_artifacts/*.zip') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-configs-zip
+          path: temp_artifacts/*.zip
+
+  # New job for S3 deployment
+  deploy-to-s3:
+    needs: [determine-configs-to-generate, generate-and-validate]
+    if: needs.determine-configs-to-generate.outputs.deploy_to_s3 == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ needs.determine-configs-to-generate.outputs.environment || 'prod' }}
+      # URL parameter points to the actual bucket
+      url: https://console.aws.amazon.com/s3/buckets/bfc-tomcat-configs/${{ needs.determine-configs-to-generate.outputs.environment || 'prod' }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID_TOMCAT_CONFIGS }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY_TOMCAT_CONFIGS }}
+      AWS_DEFAULT_REGION: us-east-1
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install AWS CLI
+        run: |
+          python -m pip install --upgrade pip
+          pip install awscli
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: downloaded_artifacts
+
+      # Prepare artifacts with ZIP files
+      - name: Prepare artifacts with ZIP files
+        run: |
+          mkdir -p temp_artifacts
+          
+          # Copy individual config directories
+          for customer_dir in downloaded_artifacts/*-*/; do
+            if [[ "$customer_dir" == *"all-configs-zip"* ]]; then
+              continue
+            fi
+            
+            # Extract customer and product names from directory
+            dir_name=$(basename "$customer_dir")
+            customer_lower=$(echo "$dir_name" | cut -d'-' -f1)
+            product=$(echo "$dir_name" | cut -d'-' -f2)
+            
+            customer_upper=$(echo "$customer_lower" | tr '[:lower:]' '[:upper:]')
+            
+            # Create output directory structure
+            mkdir -p "output/$product/$customer_upper"
+            
+            # Copy artifact contents
+            cp -r "$customer_dir"/* "output/$product/$customer_upper/" || echo "No files to copy for $customer_upper $product"
+          done
+          
+          # Copy ZIP files to temp_artifacts
+          if [ -d "downloaded_artifacts/all-configs-zip" ]; then
+            cp downloaded_artifacts/all-configs-zip/*.zip temp_artifacts/ || echo "No ZIP files found"
+            echo "Available ZIP files:"
+            ls -la temp_artifacts/*.zip || echo "No ZIP files in temp_artifacts"
+          else
+            echo "No all-configs-zip artifact found"
+          fi
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+        
+      - name: Debug S3 deployment
+        run: |
+          echo "Preparing to deploy to S3"
+          echo "Customer: ${{ needs.determine-configs-to-generate.outputs.customer }}"
+          echo "Products: ${{ needs.determine-configs-to-generate.outputs.products }}"
+          echo "Environment: ${{ needs.determine-configs-to-generate.outputs.environment || 'prod' }}"
+          echo "AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION"
+          echo "AWS credentials: $(if [ -n "$AWS_ACCESS_KEY_ID" ]; then echo "Set"; else echo "Not set"; fi)"
+          
+          echo "Downloaded artifacts:"
+          ls -la downloaded_artifacts || echo "No downloaded artifacts directory"
+          
+          echo "Available ZIP files in temp_artifacts:"
+          ls -la temp_artifacts/*.zip || echo "No ZIP files in temp_artifacts"
+
+      - name: Deploy to S3
+        run: |
+          # Process all customers and products as needed - DYNAMIC CUSTOMER PARSING
+          CUSTOMER_INPUT="${{ needs.determine-configs-to-generate.outputs.customer }}"
+          if [ "$CUSTOMER_INPUT" = "all" ]; then
+            # Dynamically get all customers from group_vars directory
+            CUSTOMERS=""
+            for customer_file in ansible/group_vars/*.yml; do
+              if [ -f "$customer_file" ]; then
+                customer_name=$(basename "$customer_file" .yml)
+                CUSTOMERS="$CUSTOMERS $customer_name"
+              fi
+            done
+            # Trim leading/trailing spaces
+            CUSTOMERS=$(echo "$CUSTOMERS" | xargs)
+          else
+            CUSTOMERS=$(echo "$CUSTOMER_INPUT" | sed 's/,/ /g')
+          fi
+          
+          PRODUCTS=$(echo "${{ needs.determine-configs-to-generate.outputs.products }}" | tr ',' ' ' | tr -s ' ')
+          ENVIRONMENT="${{ needs.determine-configs-to-generate.outputs.environment || 'prod' }}"
+          
+          # Get product versions
+          DAKOTA_VERSION="${{ needs.determine-configs-to-generate.outputs.dakota_version }}"
+          SELECTPRIME_VERSION="${{ needs.determine-configs-to-generate.outputs.selectprime_version }}"
+          API_VERSION="${{ needs.determine-configs-to-generate.outputs.api_version }}"
+          TRAX_VERSION="${{ needs.determine-configs-to-generate.outputs.trax_version }}"
+          
+          # Function to upload configs to S3 with new versioned structure
+          upload_configs() {
+            local customer=$1
+            local product=$2
+            local version=$3
+            local env=$4
+            
+            customer_upper=$(echo "$customer" | tr '[:lower:]' '[:upper:]')
+            customer_lower=$(echo "$customer" | tr '[:upper:]' '[:lower:]')
+            
+            echo "Uploading $product v$version configs for $customer_upper to S3..."
+            
+            # New S3 path structure: environment/prod/product/version/customer/
+            local s3_base_path="s3://bfc-tomcat-configs/$env/$product/v$version/$customer_upper"
+            
+            # Upload individual config files if directory exists
+            if [ -d "downloaded_artifacts/$customer_lower-$product-v$version-configs/configs" ]; then
+              echo "Uploading individual config files to $s3_base_path/configs/"
+              aws s3 cp "downloaded_artifacts/$customer_lower-$product-v$version-configs/configs/" "$s3_base_path/configs/" --recursive || echo "Failed to upload config files"
+            elif [ -d "downloaded_artifacts/$customer_lower-$product-v$version-configs" ]; then
+              echo "Uploading config files from root directory to $s3_base_path/configs/"
+              aws s3 cp "downloaded_artifacts/$customer_lower-$product-v$version-configs/" "$s3_base_path/configs/" --recursive || echo "Failed to upload config files"
+            else
+              echo "No config directory found for $customer_upper $product v$version"
+            fi
+            
+            # Upload complete package if it exists
+            if [ -f "temp_artifacts/$customer_lower-$product-v$version-complete.zip" ]; then
+              echo "Uploading complete package for $customer_upper $product v$version to $s3_base_path/complete/"
+              aws s3 cp "temp_artifacts/$customer_lower-$product-v$version-complete.zip" "$s3_base_path/complete/" || echo "Failed to upload complete package"
+            fi
+            
+            # Upload config ZIP if it exists
+            if [ -f "temp_artifacts/$customer_lower-$product-v$version-configs.zip" ]; then
+              echo "Uploading config ZIP for $customer_upper $product v$version to $s3_base_path/configs/"
+              aws s3 cp "temp_artifacts/$customer_lower-$product-v$version-configs.zip" "$s3_base_path/configs/" || echo "Failed to upload config ZIP"
+            fi
+          }
+          
+          # Upload configs for all customers and products
+          for customer in $CUSTOMERS; do
+            for product in $PRODUCTS; do
+              # Trim whitespace from product name
+              product=$(echo "$product" | xargs)
+              if [ "$product" = "all" ]; then
+                # Process all products with their respective versions
+                upload_configs "$customer" "dakota" "$DAKOTA_VERSION" "$ENVIRONMENT"
+                upload_configs "$customer" "selectprime" "$SELECTPRIME_VERSION" "$ENVIRONMENT"
+                upload_configs "$customer" "api" "$API_VERSION" "$ENVIRONMENT"
+                upload_configs "$customer" "trax" "$TRAX_VERSION" "$ENVIRONMENT"
+              elif [ "$product" = "dakota" ]; then
+                upload_configs "$customer" "$product" "$DAKOTA_VERSION" "$ENVIRONMENT"
+              elif [ "$product" = "selectprime" ]; then
+                upload_configs "$customer" "$product" "$SELECTPRIME_VERSION" "$ENVIRONMENT"
+              elif [ "$product" = "api" ]; then
+                upload_configs "$customer" "$product" "$API_VERSION" "$ENVIRONMENT"
+              elif [ "$product" = "trax" ]; then
+                upload_configs "$customer" "$product" "$TRAX_VERSION" "$ENVIRONMENT"
+              fi
+            done
+          done
+
+      - name: Show S3 deployment results
+        run: |
+          echo "## S3 Deployment Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Show what was uploaded
+          ENVIRONMENT="${{ needs.determine-configs-to-generate.outputs.environment || 'prod' }}"
+          
+          echo "Files uploaded to S3 bucket: bfc-tomcat-configs" >> $GITHUB_STEP_SUMMARY
+          echo "Environment: $ENVIRONMENT" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Track files uploaded in this run
+          uploaded_files_count=0
+          
+          # Function to check and report uploaded files for a specific customer/product/version
+          report_uploaded_files() {
+            local customer=$1
+            local product=$2
+            local version=$3
+            local env=$4
+            
+            customer_upper=$(echo "$customer" | tr '[:lower:]' '[:upper:]')
+            customer_lower=$(echo "$customer" | tr '[:upper:]' '[:lower:]')
+            
+            local s3_base_path="s3://bfc-tomcat-configs/$env/$product/v$version/$customer_upper"
+            
+            echo "Files uploaded for $customer_upper $product v$version:" >> /tmp/this_run_uploads.txt
+            
+            # Check if configs were uploaded
+            if [ -d "downloaded_artifacts/$customer_lower-$product-v$version-configs" ]; then
+              echo "  📁 Config files to: $s3_base_path/configs/" >> /tmp/this_run_uploads.txt
+              find "downloaded_artifacts/$customer_lower-$product-v$version-configs" -type f | while read file; do
+                filename=$(basename "$file")
+                echo "    - $filename" >> /tmp/this_run_uploads.txt
+                uploaded_files_count=$((uploaded_files_count + 1))
+              done
+            fi
+            
+            # Check if complete package was uploaded
+            if [ -f "temp_artifacts/$customer_lower-$product-v$version-complete.zip" ]; then
+              echo "  📦 Complete package to: $s3_base_path/complete/" >> /tmp/this_run_uploads.txt
+              echo "    - $customer_lower-$product-v$version-complete.zip" >> /tmp/this_run_uploads.txt
+              uploaded_files_count=$((uploaded_files_count + 1))
+            fi
+            
+            # Check if config ZIP was uploaded
+            if [ -f "temp_artifacts/$customer_lower-$product-v$version-configs.zip" ]; then
+              echo "  📄 Config ZIP to: $s3_base_path/configs/" >> /tmp/this_run_uploads.txt
+              echo "    - $customer_lower-$product-v$version-configs.zip" >> /tmp/this_run_uploads.txt
+              uploaded_files_count=$((uploaded_files_count + 1))
+            fi
+          }
+          
+          # Create report for this run's uploads
+          echo "" > /tmp/this_run_uploads.txt
+          
+          # Process all customers and products from this run - DYNAMIC CUSTOMER PARSING
+          CUSTOMER_INPUT="${{ needs.determine-configs-to-generate.outputs.customer }}"
+          if [ "$CUSTOMER_INPUT" = "all" ]; then
+            # Dynamically get all customers from group_vars directory
+            CUSTOMERS=""
+            for customer_file in ansible/group_vars/*.yml; do
+              if [ -f "$customer_file" ]; then
+                customer_name=$(basename "$customer_file" .yml)
+                CUSTOMERS="$CUSTOMERS $customer_name"
+              fi
+            done
+            # Trim leading/trailing spaces
+            CUSTOMERS=$(echo "$CUSTOMERS" | xargs)
+          else
+            CUSTOMERS=$(echo "$CUSTOMER_INPUT" | sed 's/,/ /g')
+          fi
+          
+          PRODUCTS=$(echo "${{ needs.determine-configs-to-generate.outputs.products }}" | tr ',' ' ' | tr -s ' ')
+          
+          # Get product versions
+          DAKOTA_VERSION="${{ needs.determine-configs-to-generate.outputs.dakota_version }}"
+          SELECTPRIME_VERSION="${{ needs.determine-configs-to-generate.outputs.selectprime_version }}"
+          API_VERSION="${{ needs.determine-configs-to-generate.outputs.api_version }}"
+          TRAX_VERSION="${{ needs.determine-configs-to-generate.outputs.trax_version }}"
+          
+          # Report uploads for each customer/product combination that was processed
+          for customer in $CUSTOMERS; do
+            for product in $PRODUCTS; do
+              # Trim whitespace from product name
+              product=$(echo "$product" | xargs)
+              if [ "$product" = "all" ]; then
+                # Process all products with their respective versions
+                report_uploaded_files "$customer" "dakota" "$DAKOTA_VERSION" "$ENVIRONMENT"
+                report_uploaded_files "$customer" "selectprime" "$SELECTPRIME_VERSION" "$ENVIRONMENT"
+                report_uploaded_files "$customer" "api" "$API_VERSION" "$ENVIRONMENT"
+                report_uploaded_files "$customer" "trax" "$TRAX_VERSION" "$ENVIRONMENT"
+              elif [ "$product" = "dakota" ]; then
+                report_uploaded_files "$customer" "$product" "$DAKOTA_VERSION" "$ENVIRONMENT"
+              elif [ "$product" = "selectprime" ]; then
+                report_uploaded_files "$customer" "$product" "$SELECTPRIME_VERSION" "$ENVIRONMENT"
+              elif [ "$product" = "api" ]; then
+                report_uploaded_files "$customer" "$product" "$API_VERSION" "$ENVIRONMENT"
+              elif [ "$product" = "trax" ]; then
+                report_uploaded_files "$customer" "$product" "$TRAX_VERSION" "$ENVIRONMENT"
+              fi
+            done
+          done
+          
+          # Display the uploads from this run
+          if [ -f /tmp/this_run_uploads.txt ] && [ -s /tmp/this_run_uploads.txt ]; then
+            echo "**Files uploaded in this run:**" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            cat /tmp/this_run_uploads.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**No files were uploaded in this run**" >> $GITHUB_STEP_SUMMARY
+            echo "Check the deployment logs above for any upload errors." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Access your files using:**" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo "# List files from this run:" >> $GITHUB_STEP_SUMMARY
+          
+          # Generate specific S3 ls commands for this run's uploads
+          for customer in $CUSTOMERS; do
+            for product in $PRODUCTS; do
+              # Trim whitespace from product name
+              product=$(echo "$product" | xargs)
+              if [ "$product" != "all" ]; then
+                case $product in
+                  "dakota")
+                    echo "aws s3 ls s3://bfc-tomcat-configs/$ENVIRONMENT/$product/v$DAKOTA_VERSION/$(echo "$customer" | tr '[:lower:]' '[:upper:]')/ --profile bfc-tomcat-app-reader --recursive" >> $GITHUB_STEP_SUMMARY
+                    ;;
+                  "selectprime")
+                    echo "aws s3 ls s3://bfc-tomcat-configs/$ENVIRONMENT/$product/v$SELECTPRIME_VERSION/$(echo "$customer" | tr '[:lower:]' '[:upper:]')/ --profile bfc-tomcat-app-reader --recursive" >> $GITHUB_STEP_SUMMARY
+                    ;;
+                  "api")
+                    echo "aws s3 ls s3://bfc-tomcat-configs/$ENVIRONMENT/$product/v$API_VERSION/$(echo "$customer" | tr '[:lower:]' '[:upper:]')/ --profile bfc-tomcat-app-reader --recursive" >> $GITHUB_STEP_SUMMARY
+                    ;;
+                  "trax")
+                    echo "aws s3 ls s3://bfc-tomcat-configs/$ENVIRONMENT/$product/v$TRAX_VERSION/$(echo "$customer" | tr '[:lower:]' '[:upper:]')/ --profile bfc-tomcat-app-reader --recursive" >> $GITHUB_STEP_SUMMARY
+                    ;;
+                esac
+              fi
+            done
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Or browse all files:" >> $GITHUB_STEP_SUMMARY
+          echo "aws s3 ls s3://bfc-tomcat-configs/$ENVIRONMENT/ --profile bfc-tomcat-app-reader --recursive" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
