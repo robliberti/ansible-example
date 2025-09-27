@@ -1,0 +1,124 @@
+.github/workflows/investigate-generate.yml
+
+name: Investigate Config Generation
+
+on:
+  workflow_dispatch:
+
+jobs:
+  investigate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ansible jinja2 pyyaml lxml
+          sudo apt-get update
+          sudo apt-get install -y libxml2-utils
+
+      - name: Make scripts executable
+        run: chmod +x scripts/*.sh
+
+      - name: Create output directory
+        run: |
+          mkdir -p output
+          chmod 777 output
+          echo "Created output directory:"
+          ls -la
+
+      - name: Inspect project structure
+        run: |
+          echo "Project structure:"
+          ls -la
+          
+          echo "Ansible structure:"
+          ls -la ansible/
+          
+          echo "Playbooks:"
+          ls -la ansible/playbooks/ || echo "No playbooks directory"
+          
+          echo "Templates:"
+          ls -la ansible/templates/ || echo "No templates directory"
+          
+          echo "Group vars:"
+          ls -la ansible/group_vars/ || echo "No group_vars directory"
+          
+          echo "Inventory:"
+          ls -la ansible/inventory/ || echo "No inventory directory"
+          
+          echo "Scripts:"
+          ls -la scripts/
+          
+          echo "Python version:"
+          python --version
+          
+          echo "Ansible version:"
+          ansible --version
+
+      - name: Create basic inventory file
+        run: |
+          mkdir -p ansible/inventory
+          echo "[localhost]" > ansible/inventory/hosts
+          echo "localhost ansible_connection=local" >> ansible/inventory/hosts
+          echo "[customers]" >> ansible/inventory/hosts
+          
+          # Add customers from group_vars
+          for customer_file in ansible/group_vars/*.yml; do
+            customer_name=$(basename "$customer_file" .yml)
+            echo "$customer_name" >> ansible/inventory/hosts
+          done
+          
+          echo "Created inventory file:"
+          cat ansible/inventory/hosts
+
+      - name: Test simplified playbook
+        run: |
+          cat > test-playbook.yml << EOF
+          ---
+          - name: Test playbook
+            hosts: localhost
+            connection: local
+            gather_facts: no
+            tasks:
+              - name: Ensure output directory exists
+                file:
+                  path: output/test
+                  state: directory
+                  mode: '0755'
+              
+              - name: Create test file
+                copy:
+                  content: "Test content"
+                  dest: output/test/test.xml
+              
+              - name: Show file was created
+                shell: ls -la output/test/
+                register: ls_output
+              
+              - name: Display result
+                debug:
+                  msg: "{{ ls_output.stdout_lines }}"
+          EOF
+          
+          echo "Running test playbook:"
+          ansible-playbook -i ansible/inventory/hosts test-playbook.yml -v
+
+      - name: Test running generate script
+        run: |
+          echo "Running generate script for GSF/Dakota only:"
+          ./scripts/generate.sh -c gsf -p dakota -e prod
+          
+          echo "Checking if any files were generated:"
+          find output -type f | sort
+          
+          echo "Creating test file in output to verify permissions:"
+          echo "Test content" > output/gsf-dakota-test.xml
+          ls -la output/
